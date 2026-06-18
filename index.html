@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forest Adventure - Game Jam</title>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Remove barras de rolagem */
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace; /* Fonte com estilo retrô/jogo */
+            color: white;
+        }
+
+        /* O Canvas do Three.js vai ocupar o fundo */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Camada da Interface de Usuário (Menus e HUD) */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            pointer-events: none; /* Deixa os cliques passarem para o canvas quando necessário */
+        }
+
+        /* Classes para centralizar os menus */
+        .screen {
+            display: none; /* Escondido por padrão, o main.js vai alterar isso */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); /* Fundo escuro semi-transparente */
+            pointer-events: auto; /* Reativa os cliques nos menus */
+        }
+
+        .screen.active {
+            display: flex;
+        }
+
+        h1 {
+            font-size: 4rem;
+            color: #4CAF50; /* Verde floresta */
+            text-shadow: 2px 2px 4px #000;
+            margin-bottom: 20px;
+        }
+
+        h2 { font-size: 3rem; margin-bottom: 10px; }
+        p { font-size: 1.5rem; margin-bottom: 30px; }
+
+        /* Estilo dos Botões (Substitui os Rects do Pygame) */
+        button {
+            background-color: #2b2b2b;
+            color: white;
+            border: 2px solid #4CAF50;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            margin: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        button:hover {
+            background-color: #4CAF50;
+            color: black;
+        }
+
+        /* Heads Up Display (HUD) - Vida e Fase durante o gameplay */
+        #hud {
+            display: none;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+        }
+
+        #hud.active { display: block; }
+        .hud-text { font-size: 2rem; font-weight: bold; margin: 5px 0; text-shadow: 2px 2px 2px #000; }
+        
+        /* Instruções de controle fixas na tela */
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 1.2rem;
+            opacity: 0.7;
+        }
+    </style>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        
+        <div id="menu-screen" class="screen active">
+            <h1>Forest Adventure</h1>
+            <button id="btn-start">Iniciar Jogo</button>
+            <button id="btn-music">Música: LIGADA</button>
+            <div id="controls-hint">Teclas: A, D (Mover) | ESPAÇO (Pular) | K (Atirar)</div>
+        </div>
+
+        <div id="paused-screen" class="screen">
+            <h2>JOGO PAUSADO</h2>
+            <p>Pressione ESC para retornar</p>
+        </div>
+
+        <div id="phase-screen" class="screen">
+            <h2 style="color: cyan;">FASE CONCLUÍDA!</h2>
+            <p>Pressione ENTER para a próxima fase</p>
+        </div>
+
+        <div id="gameover-screen" class="screen">
+            <h2 style="color: red;">GAME OVER</h2>
+            <p>Pressione ENTER para voltar ao menu</p>
+        </div>
+
+        <div id="win-screen" class="screen">
+            <h2 style="color: gold;">VOCÊ VENCEU!</h2>
+            <p>A floresta está a salvo.</p>
+            <p>Pressione ENTER para voltar ao menu</p>
+        </div>
+
+        <div id="hud">
+            <div class="hud-text" id="hud-health">VIDA: 5</div>
+            <div class="hud-text" id="hud-phase">FASE: 1/3</div>
+        </div>
+
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>
