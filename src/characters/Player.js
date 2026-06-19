@@ -12,6 +12,11 @@ export class Player extends Character {
         this.invulnerabilityDuration = 120; 
         this.flashDuration = 0; 
 
+        // O SISTEMA DE MANA QUE ESTAVA A FALTAR!
+        this.maxMana = 100;
+        this.mana = 100;
+        this.manaRegenRate = 0.3; // Recupera a mana devagarinho a cada frame
+
         this.animations = {
             "idle": this._loadAnimationFrames("player/player_idle", 18), 
             "run": this._loadAnimationFrames("player/player_run", 18),
@@ -23,6 +28,20 @@ export class Player extends Character {
     update(keys, platforms, gravity, sounds = null) {
         let moving = false;
         const moveSpeed = this.isOnGround ? 4.0 : 3.0;
+
+        // Recuperação passiva da Mana
+        if (this.mana < this.maxMana) {
+            this.mana = Math.min(this.maxMana, this.mana + this.manaRegenRate);
+        }
+
+        // Mecânica de queda das plataformas One-Way
+        const isDownKeyDown = keys['s'] || keys['arrowdown'];
+        if (isDownKeyDown && this.isOnGround && this.currentPlatform && this.currentPlatform.oneWay) {
+            this.sprite.position.y -= 6; 
+            this.vy = -2; 
+            this.isOnGround = false;
+            this.currentPlatform = null; 
+        }
 
         if (Math.abs(this.knockbackX) < 2) {
             if (keys['a'] || keys['arrowleft']) {

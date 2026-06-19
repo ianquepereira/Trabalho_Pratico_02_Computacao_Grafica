@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { Player } from './characters/Player.js';
 import { Enemy } from './characters/Enemy.js';
 import { Guardian } from './characters/Guardian.js';
+// REMOVIDO: A importação do Trap
+import { Coin } from './Interactables.js';
 import { setupEnvironment, updateCamera, buildLevel } from './scene.js';
 
 // ==========================================
@@ -24,9 +26,12 @@ let platformsData = [];
 let movingPlatforms = [];
 let rotatingObstacles = [];
 
+let coins = [];
+let coinsCollected = 0;
+
 let leverMesh = null;
 let gateMesh = null;
-let gateExitX = 0; // Armazena a coordenada do portão de saída
+let gateExitX = 0; 
 let isLeverActivated = false;
 let isGuardianDefeated = false;
 let isMusicEnabled = true;
@@ -152,7 +157,11 @@ window.addEventListener('keydown', (e) => {
     }
 
     if (gameState === "playing" && (e.key.toLowerCase() === 'x' || e.key.toLowerCase() === 'k')) {
-        if (player) {
+        const MANA_COST = 25; 
+        
+        if (player && player.mana >= MANA_COST) {
+            player.mana -= MANA_COST;
+            
             const direction = player.flipX ? -1 : 1;
             playerProjectiles.push(new Projectile(player.sprite.position.x, player.sprite.position.y, direction));
             safePlayEffect(sounds.shoot);
@@ -168,11 +177,14 @@ window.addEventListener('keyup', (e) => {
 // 7. MECÂNICAS REATIVAS DO FLUXO
 // ==========================================
 function resetGame() {
-    // 1. Limpa o cenário antigo de forma correta e segura (usando destroy)
     enemies.forEach(e => e.destroy());
     enemies = [];
     playerProjectiles.forEach(p => p.destroy());
     playerProjectiles = [];
+    
+    coins.forEach(c => c.destroy());
+    coins = [];
+    coinsCollected = 0;
 
     platformsData.forEach(p => scene.remove(p));
     movingPlatforms.forEach(p => scene.remove(p.mesh));
@@ -183,19 +195,19 @@ function resetGame() {
     isLeverActivated = false;
     isGuardianDefeated = false;
 
-    // 2. Reinicia o jogador na ponta esquerda do novo mapa estendido (-750)
+    // ATUALIZADO: Nasce em -850 para não ver a borda do mapa
     if (!player) {
-        player = new Player(scene, -750, -50); 
+        player = new Player(scene, -850, -50); 
     } else {
-        player.sprite.position.set(-750, -50, 0);
-        player.health = 5;
+        player.sprite.position.set(-850, -50, 0);
+        player.health = player.maxHealth; 
+        player.mana = player.maxMana;     
         player.vy = 0;
-        player.knockbackX = 0; // Limpa o knockback ao reiniciar
+        player.knockbackX = 0; 
         player.invulnerabilityTimer = 0;
         player.flashTimer = 0;
     }
 
-    // 3. A MÁGICA: O main pede os blocos já prontos ao scene.js
     const levelData = buildLevel(scene, currentPhase);
 
     platformsData = levelData.platformsData;
@@ -204,29 +216,56 @@ function resetGame() {
     leverMesh = levelData.leverMesh;
     gateMesh = levelData.gateMesh;
     
-    // Salva a coordenada do portão de forma segura
     if (gateMesh) {
         gateExitX = gateMesh.position.x;
     }
 
-    // 4. Instancia a horda de Inimigos Comuns usando a classe específica Enemy
     if (levelData.enemiesSpawn) {
         levelData.enemiesSpawn.forEach(spawnData => {
             enemies.push(new Enemy(scene, spawnData.x, spawnData.y, spawnData.patrol));
         });
     }
 
-    // 5. Instancia o Inimigo Guardião no local correto usando a classe específica Guardian
     if (levelData.guardianSpawn) {
         enemies.push(new Guardian(scene, levelData.guardianSpawn.x, levelData.guardianSpawn.y, levelData.guardianSpawn.patrol));
+    }
+
+    if (levelData.coinsSpawn) {
+        levelData.coinsSpawn.forEach(spawnData => {
+            coins.push(new Coin(scene, spawnData.x, spawnData.y));
+        });
     }
 
     updateHUD();
 }
 
 function updateHUD() {
-    if(player) hudHealth.innerText = `VIDA: ${player.health}`;
-    hudPhase.innerText = `FASE COMPACTA: ${currentPhase}/1`;
+    if(player) {
+        const hpPercent = Math.max(0, (player.health / player.maxHealth) * 100);
+        const manaPercent = Math.max(0, (player.mana / player.maxMana) * 100);
+        
+        hudHealth.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div>
+                    <div style="margin-bottom: 8px;">
+                        <div style="width: 200px; height: 18px; background: #222; border: 2px solid #fff; border-radius: 4px; overflow: hidden; box-shadow: 2px 2px 0px #000;">
+                            <div style="width: ${hpPercent}%; height: 100%; background: #e74c3c; transition: width 0.2s ease-out;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="width: 160px; height: 12px; background: #222; border: 2px solid #fff; border-radius: 4px; overflow: hidden; box-shadow: 2px 2px 0px #000;">
+                            <div style="width: ${manaPercent}%; height: 100%; background: #3498db;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div style="color: #fff; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 0px #000;">
+                    🪙 x ${coinsCollected} <span style="font-size: 14px; color: #aaa;">/10</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    hudPhase.innerText = `FASE: ${currentPhase}/1`;
 }
 
 // ==========================================
@@ -237,7 +276,6 @@ function animate() {
 
     if (gameState === "playing" && player) {
         
-        // Atualiza Plataformas Móveis e injeta a força de atrito (deltaX)
         movingPlatforms.forEach(p => {
             const delta = p.speed * p.direction;
             p.mesh.position.x += delta;
@@ -248,14 +286,12 @@ function animate() {
             }
         });
 
-        // Atualiza elementos giratórios
         rotatingObstacles.forEach(o => {
             o.mesh.rotation.z += o.speed; 
         });
 
         const activeColliders = [...platformsData, ...movingPlatforms.map(p => p.mesh)];
 
-        // Física e Colisões do Player
         player.update(keys, activeColliders, GRAVITY, sounds);
         
         if (playerAuraLight) {
@@ -264,14 +300,12 @@ function animate() {
 
         updateCamera(camera, player, WIDTH);
 
-        // Verifica se algum Guardião ainda está vivo
         isGuardianDefeated = !enemies.some(e => e.isGuardian);
 
         for (let i = enemies.length - 1; i >= 0; i--) {
             let e = enemies[i];
             e.update(player.sprite.position, activeColliders, GRAVITY);
 
-            // Enviamos a posição do inimigo para aplicar o Knockback no Player
             if (player.sprite.position.distanceTo(e.sprite.position) < 55) {
                 player.takeDamage(1, sounds, e.sprite.position.x);
             }
@@ -286,13 +320,11 @@ function animate() {
                 let e = enemies[j];
                 if (p.mesh.position.distanceTo(e.sprite.position) < 65) { 
                     
-                    // Enviamos a posição do projétil para aplicar o Knockback no Inimigo
                     e.takeDamage(1, sounds, p.mesh.position.x);
                     
                     hit = true;
-                    // Inimigo morre
                     if (e.health <= 0) {
-                        e.destroy(); // Apaga o sprite e também apaga as barras de vida!
+                        e.destroy(); 
                         enemies.splice(j, 1);
                     }
                     break;
@@ -304,14 +336,31 @@ function animate() {
             }
         }
 
-        // Lógica da Alavanca
+        for (let i = coins.length - 1; i >= 0; i--) {
+            let c = coins[i];
+            c.update(); 
+
+            if (player.hitbox.intersectsBox(c.hitbox)) {
+                c.destroy();
+                coins.splice(i, 1);
+                coinsCollected++;
+                
+                safePlayEffect(sounds.jump); 
+
+                if (coinsCollected >= 10) {
+                    player.health = Math.min(player.maxHealth, player.health + 1);
+                    coinsCollected = 0;
+                    safePlayEffect(sounds.win); 
+                }
+            }
+        }
+
         if (leverMesh && player.sprite.position.distanceTo(leverMesh.position) < 60 && isGuardianDefeated && !isLeverActivated) {
             isLeverActivated = true;
             leverMesh.material.color.setHex(0x00ff00); 
             safePlayEffect(sounds.win); 
         }
 
-        // Abertura do Portão
         if (isLeverActivated && gateMesh) {
             gateMesh.position.y += 2; 
             if(gateMesh.position.y > 400) {
@@ -320,14 +369,12 @@ function animate() {
             }
         }
 
-        // Derrota (Perder Vida ou Cair no Abismo)
         if (player.health <= 0 || player.sprite.position.y < -400) {
             gameState = "game_over";
             uiGameOver.classList.add('active');
             sounds.bgm.pause();
         }
 
-        // Vitória (Passar pela porta)
         if (isLeverActivated && player.sprite.position.x > gateExitX) {
             gameState = "win";
             uiWin.classList.add('active');

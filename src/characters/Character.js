@@ -101,6 +101,12 @@ export class Character {
             const platTop = plat.position.y + h / 2;
             const platBottom = plat.position.y - h / 2;
             
+            if (plat.oneWay) {
+                if (this.vy > 0 || previousFeetY < platTop - 2) {
+                    continue; 
+                }
+            }
+
             const isInsideHorizontal = this.sprite.position.x + 15 > platLeft && this.sprite.position.x - 15 < platRight;
             const isInsideVertical = headY > platBottom && feetY < platTop;
 
@@ -216,6 +222,7 @@ export class Character {
             this.isOnGround = false;
         }
 
+        // CORRIGIDO: Removido o duplicado '.sounds' que quebrava a execução
         if (sounds && sounds.damage) {
             sounds.damage.currentTime = 0;
             sounds.damage.play().catch(() => {});

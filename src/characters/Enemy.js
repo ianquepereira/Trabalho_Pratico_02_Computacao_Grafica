@@ -2,10 +2,15 @@ import { Character } from './Character.js';
 
 export class Enemy extends Character {
     constructor(scene, x, y, patrolRange = [-200, 200]) {
-        super(scene, "enemy", x, y, "enemy", "run", 2);
-        this.sprite.scale.set(80, 80, 1);
+        super(scene, "enemy", x, y, "enemy", "idle", 2);
+        
+        // Base de tamanho para o Squash & Stretch
+        this.baseWidth = 50;
+        this.baseHeight = 50;
+        this.sprite.scale.set(this.baseWidth, this.baseHeight, 1);
         this.visualFeetOffset = 6; 
 
+        // Suas configurações de combate mantidas
         this.hasKnockback = false;
         this.flashesOnDamage = true;
         this.invulnerabilityDuration = 0; 
@@ -13,76 +18,90 @@ export class Enemy extends Character {
 
         this.initHealthBar();
 
-        this.patrolRangeStart = patrolRange[0];
-        this.patrolRangeEnd = patrolRange[1];
-        this.speed = 1.5; 
-        this.direction = 1;
+        this.patrolMin = patrolRange[0];
+        this.patrolMax = patrolRange[1];
         this.detectionRange = 300;
         
+        // Variáveis do pulo Estilo Terraria
+        this.jumpCooldownTimer = Math.floor(Math.random() * 30);
+        this.vx = 0; 
+        this.direction = 1;
+
+        // Seus caminhos de frames de animação originais
         this.animations = {
             "idle": this._loadAnimationFrames("enemy/enemy_idle", 2),
             "run": this._loadAnimationFrames("enemy/enemy_run", 28)
         };
-        this.patrolTimer = 0;
-        this.waitTimer = Math.floor(Math.random() * (150 - 90 + 1) + 90);
     }
 
     updateBehavior(playerPos) {
-        const playerX = playerPos.x;
-        const distanceToPlayer = Math.abs(this.sprite.position.x - playerX);
-        const verticalDistance = Math.abs(this.sprite.position.y - playerPos.y);
-        
-        const isPlayerReachable = distanceToPlayer < this.detectionRange && verticalDistance < 80;
-
-        if (isPlayerReachable) {
-            let nextX = this.sprite.position.x;
-            if (distanceToPlayer > 15) {
-                if (this.sprite.position.x < playerX) {
-                    nextX += 2.0; 
-                    this.flipX = false; 
-                } else {
-                    nextX -= 2.0;
-                    this.flipX = true; 
-                }
-            }
-
-            if (nextX >= this.patrolRangeStart && nextX <= this.patrolRangeEnd && !this.hitWall) {
-                if (distanceToPlayer > 15) {
-                    this.currentAnimationName = "run";
-                    this.sprite.position.x = nextX;
-                } else {
-                    this.currentAnimationName = "idle";
-                }
-            } else {
-                this.direction = (this.sprite.position.x > playerX) ? 1 : -1; 
-                this.patrolTimer = 100; 
-                this.patrol();
-            }
-        } else {
-            this.patrol();
-        }
-    }
-
-    patrol() {
-        if (this.patrolTimer > 0) {
-            this.currentAnimationName = "run";
-            if (this.hitWall || 
-                (this.sprite.position.x > this.patrolRangeEnd && this.direction > 0) || 
-                (this.sprite.position.x < this.patrolRangeStart && this.direction < 0)) {
-                this.direction *= -1;
-                this.patrolTimer = 0;
-                this.waitTimer = Math.floor(Math.random() * (150 - 90 + 1) + 90);
-                this.sprite.position.x += this.direction * 3; 
-                return;
-            }
-            this.sprite.position.x += this.speed * this.direction;
-            this.flipX = this.direction < 0; 
-        } else if (this.waitTimer > 0) {
+        if (this.isOnGround) {
+            // ==========================================
+            // FASE 1: DESCANSO NO CHÃO (Prepara o salto)
+            // ==========================================
+            this.vx = 0;
             this.currentAnimationName = "idle";
-            this.waitTimer--;
-            if (this.waitTimer <= 0) {
-                this.patrolTimer = Math.floor(Math.random() * (300 - 180 + 1) + 180);
+            
+            if (this.jumpCooldownTimer > 0) {
+                this.jumpCooldownTimer--;
+            } else {
+                // Lógica de Visão: Decide para onde vai saltar
+                const playerX = playerPos.x;
+                const distanceToPlayer = Math.abs(this.sprite.position.x - playerX);
+                const verticalDistance = Math.abs(this.sprite.position.y - playerPos.y);
+                
+                const isPlayerReachable = distanceToPlayer < this.detectionRange && verticalDistance < 80;
+
+                if (isPlayerReachable && distanceToPlayer > 15) {
+                    // O jogador está perto: Pula na direção do jogador
+                    this.direction = (this.sprite.position.x < playerX) ? 1 : -1;
+                } else {
+                    // O jogador está longe: Patrulha normal dentro dos limites
+                    if (this.sprite.position.x <= this.patrolMin) {
+                        this.direction = 1;
+                    } else if (this.sprite.position.x >= this.patrolMax) {
+                        this.direction = -1;
+                    } else if (Math.random() < 0.15) {
+                        // Pequena chance de mudar de rumo do nada
+                        this.direction *= -1; 
+                    }
+                }
+
+                this.flipX = this.direction === -1;
+
+                // Executa o Pulo (Força Vertical + Força Horizontal)
+                this.vy = Math.random() * 4 + 8.5; 
+                this.vx = this.direction * (Math.random() * 1.5 + 2.0); 
+                this.isOnGround = false;
+                
+                // Define o tempo que ele vai ficar parado quando cair (entre 40 e 90 frames)
+                this.jumpCooldownTimer = Math.floor(Math.random() * 50) + 40; 
             }
+
+            // SQUASH: Esmaga o slime enquanto está pesado no chão
+            this.sprite.scale.set(this.baseWidth + 12, this.baseHeight - 12, 1);
+
+        } else {
+            // ==========================================
+            // FASE 2: VOO (Estilo Terraria)
+            // ==========================================
+            this.sprite.position.x += this.vx;
+            
+            // Usamos a sua animação de "run" enquanto o slime está no ar/movimento
+            this.currentAnimationName = "run"; 
+            
+            // Se ele bater numa parede a meio do salto, bate e volta
+            if (this.hitWall) {
+                this.vx *= -0.5; 
+                this.direction *= -1;
+                this.flipX = this.direction === -1;
+                this.hitWall = false;
+            }
+
+            // STRETCH: Estica o slime verticalmente baseado na velocidade da gravidade
+            const stretchY = this.baseHeight + (this.vy * 1.5);
+            const shrinkX = this.baseWidth - (this.vy * 0.8);
+            this.sprite.scale.set(shrinkX, stretchY, 1);
         }
     }
 
