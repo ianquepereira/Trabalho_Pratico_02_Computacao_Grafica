@@ -4,8 +4,15 @@ export class Guardian extends Character {
     constructor(scene, x, y, patrolRange = [-200, 200]) {
         super(scene, "enemy", x, y, "enemy", "run", 5); 
         this.isGuardian = true; 
-        this.sprite.scale.set(140, 140, 1); 
+        
+        // 1. TAMANHO REDUZIDO (Antes era 140, agora é 85. Um Boss imponente, mas não quebra a tela)
+        this.sprite.scale.set(85, 85, 1); 
         this.visualFeetOffset = 6; 
+
+        // 2. COR DO BOSS: Pinta o PNG original de vermelho agressivo
+        if (this.sprite && this.sprite.material) {
+            this.sprite.material.color.setHex(0xff3333); 
+        }
 
         this.hasKnockback = false;
         this.flashesOnDamage = true;
@@ -18,11 +25,12 @@ export class Guardian extends Character {
         this.patrolRangeEnd = patrolRange[1];
         
         this.patrolSpeed = 0.8; 
-        this.chaseSpeed = 1.2;  
+        // 3. VELOCIDADE E VISÃO AUMENTADAS
+        this.chaseSpeed = 2.2;  // Corre quase o dobro do dobro da patrulha!
         this.speed = this.patrolSpeed;
         
         this.direction = 1;
-        this.detectionRange = 400; 
+        this.detectionRange = 600; // Vê o Mago quase do outro lado da arena
         
         this.animations = {
             "idle": this._loadAnimationFrames("enemy/enemy_idle", 2),
@@ -40,7 +48,8 @@ export class Guardian extends Character {
             this.speed = this.chaseSpeed; 
             let nextX = this.sprite.position.x;
             
-            if (distanceToPlayer > 15) {
+            // Distância para o ataque (chega mais perto antes de parar)
+            if (distanceToPlayer > 10) {
                 this.currentAnimationName = "run";
                 if (this.sprite.position.x < playerX) {
                     nextX += this.speed;
@@ -53,12 +62,16 @@ export class Guardian extends Character {
                 this.currentAnimationName = "idle";
             }
 
-            if (nextX >= this.patrolRangeStart && nextX <= this.patrolRangeEnd && !this.hitWall) {
+            // 4. LÓGICA DE PERSEGUIÇÃO CORRIGIDA: 
+            // Ignora o patrolRangeStart/End quando está a perseguir!
+            // Só para se bater numa parede (hitWall).
+            if (!this.hitWall) {
                 this.sprite.position.x = nextX;
             } else {
                 this.currentAnimationName = "idle";
             }
         } else {
+            // Se o Mago sair do alcance da visão, volta à paz da patrulha
             this.speed = this.patrolSpeed;
             this.patrol();
         }

@@ -19,17 +19,65 @@ let player = null;
 let playerAuraLight = null;
 let enemies = [];
 let playerProjectiles = [];
+let droppedItems = []; 
 
 let platformsData = []; 
 let movingPlatforms = [];
 let rotatingObstacles = [];
 
-let leverMesh = null;
-let gateMesh = null;
-let gateExitX = 0; 
-let isLeverActivated = false;
-let isGuardianDefeated = false;
 let isMusicEnabled = true;
+
+// --- VARIÁVEIS DO NOVO SISTEMA DE ARENA/ROGUELITE ---
+let currentWave = 1;
+const MAX_WAVES = 3;
+let waveTransitionTimer = 0;
+let currentLevelDataCache = null;
+
+let phaseStartTime = 0;
+let totalDamageTaken = 0;
+let totalEnemiesDefeated = 0;
+
+let buffDamageTimer = 0;
+let isDamageBuffActive = false;
+
+// ==========================================
+// CLASSES AUXILIARES INTERNAS
+// ==========================================
+class DroppedItem {
+    constructor(scene, x, y, type) {
+        this.type = type; 
+        this.active = true;
+        this.lifeTime = 450; 
+        this.floatTimer = Math.random() * 10;
+
+        const geo = new THREE.PlaneGeometry(20, 20);
+        let color = 0xff3333; 
+        if (type === 'mana') color = 0x3399ff; 
+        if (type === 'buff') color = 0xffaa00; 
+
+        const mat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.position.set(x, y, 5);
+        this.baseY = y;
+        scene.add(this.mesh);
+    }
+
+    update() {
+        this.lifeTime--;
+        if (this.lifeTime <= 0) this.active = false;
+        this.floatTimer += 0.05;
+        this.mesh.position.y = this.baseY + Math.sin(this.floatTimer) * 6;
+        if (this.lifeTime < 150) {
+            this.mesh.visible = Math.floor(this.lifeTime / 10) % 2 === 0;
+        }
+    }
+
+    destroy(scene) {
+        scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+    }
+}
 
 // ==========================================
 // 2. CONFIGURAÇÃO SEGURA DE ÁUDIO
@@ -126,7 +174,6 @@ window.addEventListener('keydown', (e) => {
         
         if (player && player.mana >= MANA_COST) {
             player.mana -= MANA_COST;
-            
             const direction = player.flipX ? -1 : 1;
             playerProjectiles.push(new Projectile(scene, player.sprite.position.x, player.sprite.position.y, direction));
             safePlayEffect(sounds.shoot);
@@ -139,27 +186,134 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ==========================================
-// 6. MECÂNICAS REATIVAS DO FLUXO
+// 6. SISTEMA DE ONDAS, RANKING E SPAWN DINÂMICO
+// ==========================================
+function spawnWave(waveNumber, levelData) {
+    enemies.forEach(e => e.destroy());
+    enemies = [];
+    
+    const maxEnemiesToSpawn = waveNumber * 2; 
+    let spawnedCount = 0;
+
+    if (levelData.enemiesSpawn) {
+        levelData.enemiesSpawn.forEach((spawnData) => {
+            if (spawnedCount >= maxEnemiesToSpawn) return;
+
+            let spawnX = spawnData.x;
+            let spawnY = spawnData.y;
+            let patrolRange = [...spawnData.patrol];
+
+            // LOGICA CRITICA: Verifica se o ponto está na visão do protagonista
+            if (player && player.sprite) {
+                const playerX = player.sprite.position.x;
+                
+                // Se a distância horizontal for menor que 420px, está visível!
+                if (Math.abs(spawnX - playerX) < 420) {
+                    // Empurra o inimigo para a ponta contrária da arena mantendo o Y estável
+                    if (playerX > 0) {
+                        spawnX = -Math.abs(spawnX); // Move para a esquerda da arena
+                    } else {
+                        spawnX = Math.abs(spawnX);  // Move para a direita da arena
+                    }
+                    
+                    // Ajusta o intervalo de inteligência de patrulha para o novo ponto X
+                    const patrolWidth = patrolRange[1] - patrolRange[0];
+                    patrolRange[0] = spawnX - patrolWidth / 2;
+                    patrolRange[1] = spawnX + patrolWidth / 2;
+                }
+            }
+
+            enemies.push(new Enemy(scene, spawnX, spawnY, patrolRange));
+            spawnedCount++;
+        });
+    }
+
+    if (waveNumber === MAX_WAVES && levelData.guardianSpawn) {
+        enemies.push(new Guardian(scene, levelData.guardianSpawn.x, levelData.guardianSpawn.y, levelData.guardianSpawn.patrol));
+    }
+}
+
+function checkWaveProgress(levelData) {
+    if (enemies.length === 0 && currentWave <= MAX_WAVES) {
+        if (currentWave === MAX_WAVES) {
+            endPhaseWithVictory();
+        } else {
+            waveTransitionTimer++;
+            if (waveTransitionTimer >= 120) { 
+                waveTransitionTimer = 0;
+                currentWave++;
+                spawnWave(currentWave, levelData);
+            }
+        }
+    }
+}
+
+function handleEnemyDefeatDrop(x, y) {
+    totalEnemiesDefeated++;
+    const rand = Math.random();
+    if (rand < 0.15) droppedItems.push(new DroppedItem(scene, x, y, 'health'));
+    else if (rand >= 0.15 && rand < 0.30) droppedItems.push(new DroppedItem(scene, x, y, 'mana'));
+    else if (rand >= 0.30 && rand < 0.45) droppedItems.push(new DroppedItem(scene, x, y, 'buff'));
+}
+
+function calculateFinalRank(timeInSeconds, damageTaken) {
+    let scorePoints = 1000 - (timeInSeconds * 2) - (damageTaken * 50);
+    if (scorePoints >= 900) return "S+";
+    if (scorePoints >= 750) return "S";
+    if (scorePoints >= 600) return "A";
+    if (scorePoints >= 450) return "B";
+    return "C";
+}
+
+function endPhaseWithVictory() {
+    gameState = "win";
+    sounds.bgm.pause();
+    safePlayEffect(sounds.win);
+
+    const totalTime = Math.floor((performance.now() - phaseStartTime) / 1000);
+    const finalRank = calculateFinalRank(totalTime, totalDamageTaken);
+
+    uiWin.classList.add('active');
+    uiWin.innerHTML = `
+        <div style="text-align: center; color: white; font-family: sans-serif; padding: 20px;">
+            <h1 style="color: #f1c40f; font-size: 42px; text-shadow: 2px 2px #000;">ARENA CONCLUÍDA!</h1>
+            <div style="font-size: 90px; font-weight: bold; color: #2ecc71; margin: 20px 0; text-shadow: 4px 4px #000;">${finalRank}</div>
+            <p style="font-size: 18px;">Tempo de Combate: <span style="color:#f1c40f">${totalTime}s</span></p>
+            <p style="font-size: 18px;">Dano Sofrido: <span style="color:#e74c3c">${totalDamageTaken} HP</span></p>
+            <p style="font-size: 18px;">Inimigos Destruídos: <span style="color:#3498db">${totalEnemiesDefeated}</span></p>
+            <br>
+            <p style="font-size: 14px; color: #aaa;">Pressione [ENTER] para voltar</p>
+        </div>
+    `;
+}
+
+// ==========================================
+// 7. MECÂNICAS REATIVAS DO FLUXO
 // ==========================================
 function resetGame() {
     enemies.forEach(e => e.destroy());
     enemies = [];
     playerProjectiles.forEach(p => p.destroy());
     playerProjectiles = [];
+    droppedItems.forEach(i => i.destroy(scene));
+    droppedItems = [];
 
     platformsData.forEach(p => scene.remove(p));
     movingPlatforms.forEach(p => scene.remove(p.mesh));
     rotatingObstacles.forEach(o => scene.remove(o.mesh));
-    if(leverMesh) scene.remove(leverMesh);
-    if(gateMesh) scene.remove(gateMesh);
 
-    isLeverActivated = false;
-    isGuardianDefeated = false;
+    currentWave = 1;
+    waveTransitionTimer = 0;
+    totalDamageTaken = 0;
+    totalEnemiesDefeated = 0;
+    buffDamageTimer = 0;
+    isDamageBuffActive = false;
+    phaseStartTime = performance.now();
 
     if (!player) {
-        player = new Player(scene, -850, -50); 
+        player = new Player(scene, 0, -100); 
     } else {
-        player.sprite.position.set(-850, -50, 0);
+        player.sprite.position.set(0, -100, 0);
         player.health = player.maxHealth; 
         player.mana = player.maxMana;     
         player.vy = 0;
@@ -169,27 +323,13 @@ function resetGame() {
     }
 
     const levelData = buildLevel(scene, currentPhase);
+    currentLevelDataCache = levelData;
 
     platformsData = levelData.platformsData;
     movingPlatforms = levelData.movingPlatforms;
     rotatingObstacles = levelData.rotatingObstacles;
-    leverMesh = levelData.leverMesh;
-    gateMesh = levelData.gateMesh;
-    
-    if (gateMesh) {
-        gateExitX = gateMesh.position.x;
-    }
 
-    if (levelData.enemiesSpawn) {
-        levelData.enemiesSpawn.forEach(spawnData => {
-            enemies.push(new Enemy(scene, spawnData.x, spawnData.y, spawnData.patrol));
-        });
-    }
-
-    if (levelData.guardianSpawn) {
-        enemies.push(new Guardian(scene, levelData.guardianSpawn.x, levelData.guardianSpawn.y, levelData.guardianSpawn.patrol));
-    }
-
+    spawnWave(currentWave, levelData);
     updateHUD();
 }
 
@@ -197,13 +337,15 @@ function updateHUD() {
     if(player) {
         const hpPercent = Math.max(0, (player.health / player.maxHealth) * 100);
         const manaPercent = Math.max(0, (player.mana / player.maxMana) * 100);
-        
+        const hpBarColor = isDamageBuffActive ? '#f1c40f' : '#e74c3c';
+        const waveText = waveTransitionTimer > 0 ? "PREPARANDO..." : `ONDA: ${currentWave}/${MAX_WAVES}`;
+
         hudHealth.innerHTML = `
             <div style="display: flex; align-items: center; gap: 15px;">
                 <div>
                     <div style="margin-bottom: 8px;">
                         <div style="width: 200px; height: 18px; background: #222; border: 2px solid #fff; border-radius: 4px; overflow: hidden; box-shadow: 2px 2px 0px #000;">
-                            <div style="width: ${hpPercent}%; height: 100%; background: #e74c3c; transition: width 0.2s ease-out;"></div>
+                            <div style="width: ${hpPercent}%; height: 100%; background: ${hpBarColor}; transition: width 0.2s ease-out; background-color: ${hpBarColor};"></div>
                         </div>
                     </div>
                     <div>
@@ -212,38 +354,49 @@ function updateHUD() {
                         </div>
                     </div>
                 </div>
+                <div style="color: #fff; font-size: 16px; font-weight: bold; text-shadow: 2px 2px #000; margin-left: 10px;">
+                    ${waveText} <br> <span style="color:#f1c40f">${isDamageBuffActive ? '🔥 BUFF ATIVO!' : ''}</span>
+                </div>
             </div>
         `;
     }
     
-    hudPhase.innerText = `FASE: ${currentPhase}/1`;
+    hudPhase.innerText = `ARENA: ${currentPhase}`;
 }
 
 // ==========================================
-// 7. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
+// 8. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
 // ==========================================
 function animate() {
     requestAnimationFrame(animate);
 
     if (gameState === "playing" && player) {
         
+        if (currentLevelDataCache) {
+            checkWaveProgress(currentLevelDataCache);
+        }
+
+        if (isDamageBuffActive) {
+            buffDamageTimer--;
+            if (buffDamageTimer <= 0) isDamageBuffActive = false;
+        }
+
         movingPlatforms.forEach(p => {
             const delta = p.speed * p.direction;
             p.mesh.position.x += delta;
             p.mesh.deltaX = delta; 
-
             if (Math.abs(p.mesh.position.x - p.startX) > p.rangeX) {
                 p.direction *= -1; 
             }
         });
 
-        rotatingObstacles.forEach(o => {
-            o.mesh.rotation.z += o.speed; 
-        });
+        rotatingObstacles.forEach(o => { o.mesh.rotation.z += o.speed; });
 
         const activeColliders = [...platformsData, ...movingPlatforms.map(p => p.mesh)];
 
+        const prevHealth = player.health;
         player.update(keys, activeColliders, GRAVITY, sounds);
+        if (player.health < prevHealth) totalDamageTaken += (prevHealth - player.health);
         
         if (playerAuraLight) {
             playerAuraLight.position.set(player.sprite.position.x, player.sprite.position.y, 50);
@@ -251,14 +404,14 @@ function animate() {
 
         updateCamera(camera, player, WIDTH);
 
-        isGuardianDefeated = !enemies.some(e => e.isGuardian);
-
         for (let i = enemies.length - 1; i >= 0; i--) {
             let e = enemies[i];
             e.update(player.sprite.position, activeColliders, GRAVITY);
 
             if (player.sprite.position.distanceTo(e.sprite.position) < 55) {
+                const hpBefore = player.health;
                 player.takeDamage(1, sounds, e.sprite.position.x);
+                if (player.health < hpBefore) totalDamageTaken += (hpBefore - player.health);
             }
         }
 
@@ -271,10 +424,12 @@ function animate() {
                 let e = enemies[j];
                 if (p.mesh.position.distanceTo(e.sprite.position) < 65) { 
                     
-                    e.takeDamage(0.25, sounds, p.mesh.position.x);
+                    const damage = isDamageBuffActive ? 0.50 : 0.25;
+                    e.takeDamage(damage, sounds, p.mesh.position.x);
                     
                     hit = true;
                     if (e.health <= 0) {
+                        handleEnemyDefeatDrop(e.sprite.position.x, e.sprite.position.y);
                         e.destroy(); 
                         enemies.splice(j, 1);
                     }
@@ -287,29 +442,32 @@ function animate() {
             }
         }
 
-        if (leverMesh && player.sprite.position.distanceTo(leverMesh.position) < 60 && isGuardianDefeated && !isLeverActivated) {
-            isLeverActivated = true;
-            leverMesh.material.color.setHex(0x00ff00); 
-            safePlayEffect(sounds.win); 
-        }
+        for (let i = droppedItems.length - 1; i >= 0; i--) {
+            let item = droppedItems[i];
+            item.update();
 
-        if (isLeverActivated && gateMesh) {
-            gateMesh.position.y += 2; 
-            if(gateMesh.position.y > 400) {
-                scene.remove(gateMesh);
-                gateMesh = null;
+            if (player.sprite.position.distanceTo(item.mesh.position) < 45) {
+                if (item.type === 'health') player.health = Math.min(player.maxHealth, player.health + 1);
+                else if (item.type === 'mana') player.mana = Math.min(player.maxMana, player.mana + 40);
+                else if (item.type === 'buff') {
+                    isDamageBuffActive = true;
+                    buffDamageTimer = 360;
+                }
+                safePlayEffect(sounds.win); 
+                item.destroy(scene);
+                droppedItems.splice(i, 1);
+                continue;
+            }
+
+            if (!item.active) {
+                item.destroy(scene);
+                droppedItems.splice(i, 1);
             }
         }
 
         if (player.health <= 0 || player.sprite.position.y < -400) {
             gameState = "game_over";
             uiGameOver.classList.add('active');
-            sounds.bgm.pause();
-        }
-
-        if (isLeverActivated && player.sprite.position.x > gateExitX) {
-            gameState = "win";
-            uiWin.classList.add('active');
             sounds.bgm.pause();
         }
 
