@@ -3,31 +3,54 @@ import { Player } from './characters/Player.js';
 import { Enemy } from './characters/Enemy.js';
 import { Guardian } from './characters/Guardian.js';
 import { setupEnvironment, updateCamera, buildLevel } from './scene.js';
-import { Projectile } from './combat/Projectile.js';
+
+// Importa as DUAS magias do novo ficheiro Projectile.js
+import { Projectile, Fireball } from './combat/Projectile.js';
 
 // ==========================================
-// 1. CONSTANTES E VARIÁVEIS GLOBAIS
+// 1. CARREGAMENTO DE TEXTURAS (DROPS E PORTAL)
+// ==========================================
+const textureLoader = new THREE.TextureLoader();
+
+const itemTextures = {
+    'health': textureLoader.load('/images/Transperent/Icon1.png'),
+    'buff': textureLoader.load('/images/Transperent/Icon38.png'),
+    'mana': textureLoader.load('/images/Transperent/Icon40.png')
+};
+
+const portalTextureBase = textureLoader.load('/images/portalRings2.png');
+
+Object.values(itemTextures).forEach(tex => {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+});
+portalTextureBase.magFilter = THREE.NearestFilter;
+portalTextureBase.minFilter = THREE.NearestFilter;
+
+// ==========================================
+// 2. CONSTANTES E VARIÁVEIS GLOBAIS
 // ==========================================
 const WIDTH = 800;
 const HEIGHT = 600;
-const GRAVITY = 0.6; 
+const GRAVITY = 0.6;
 
-let gameState = "menu"; 
+let gameState = "menu";      // "menu" | "playing" | "paused" | "game_over" | "win"
 let currentPhase = 1;
 
 let player = null;
 let playerAuraLight = null;
 let enemies = [];
+let portals = [];
 let playerProjectiles = [];
-let droppedItems = []; 
+let droppedItems = [];
 
-let platformsData = []; 
+let platformsData = [];
 let movingPlatforms = [];
 let rotatingObstacles = [];
 
 let isMusicEnabled = true;
+let isSfxEnabled = true;     // NOVO: controla efeitos sonoros
 
-// --- VARIÁVEIS DO NOVO SISTEMA DE ARENA/ROGUELITE ---
 let currentWave = 1;
 const MAX_WAVES = 3;
 let waveTransitionTimer = 0;
@@ -41,21 +64,23 @@ let buffDamageTimer = 0;
 let isDamageBuffActive = false;
 
 // ==========================================
-// CLASSES AUXILIARES INTERNAS
+// 3. CLASSES AUXILIARES INTERNAS
 // ==========================================
 class DroppedItem {
     constructor(scene, x, y, type) {
-        this.type = type; 
+        this.type = type;
         this.active = true;
-        this.lifeTime = 450; 
+        this.lifeTime = 450;
         this.floatTimer = Math.random() * 10;
 
-        const geo = new THREE.PlaneGeometry(20, 20);
-        let color = 0xff3333; 
-        if (type === 'mana') color = 0x3399ff; 
-        if (type === 'buff') color = 0xffaa00; 
+        const geo = new THREE.PlaneGeometry(24, 24);
+        const mat = new THREE.MeshBasicMaterial({
+            map: itemTextures[type],
+            transparent: true,
+            alphaTest: 0.1,
+            side: THREE.DoubleSide
+        });
 
-        const mat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
         this.mesh = new THREE.Mesh(geo, mat);
         this.mesh.position.set(x, y, 5);
         this.baseY = y;
@@ -79,14 +104,101 @@ class DroppedItem {
     }
 }
 
+class Portal {
+    constructor(scene, x, y, waveNumber) {
+        this.scene = scene;
+        this.x = x;
+        this.y = y;
+        this.waveNumber = waveNumber;
+
+        this.health = 0.5 + (waveNumber * 0.5);
+        this.active = true;
+
+        this.spawnTimer = 40 + Math.random() * 60;
+        this.spawnInterval = 180;
+
+        this.texture = portalTextureBase.clone();
+        this.texture.needsUpdate = true;
+        this.texture.repeat.set(1 / 5, 1);
+        this.texture.offset.x = 0;
+
+        this.currentFrame = 0;
+        this.totalFrames = 5;
+        this.frameTimer = 0;
+        this.animationSpeed = 6;
+
+        const geo = new THREE.PlaneGeometry(64, 64);
+        this.material = new THREE.MeshBasicMaterial({
+            map: this.texture,
+            transparent: true,
+            alphaTest: 0.1,
+            side: THREE.DoubleSide
+        });
+        this.mesh = new THREE.Mesh(geo, this.material);
+        this.mesh.position.set(x, y + 14, -2);
+        this.scene.add(this.mesh);
+
+        this.light = new THREE.PointLight(0x2ecc71, 1.5, 200);
+        this.light.position.set(x, y + 14, 10);
+        this.scene.add(this.light);
+    }
+
+    update(enemiesArray) {
+        if (!this.active) return;
+
+        // animação do sprite sheet
+        this.frameTimer++;
+        if (this.frameTimer >= this.animationSpeed) {
+            this.frameTimer = 0;
+            this.currentFrame = (this.currentFrame + 1) % this.totalFrames;
+            this.texture.offset.x = this.currentFrame / this.totalFrames;
+        }
+
+        // spawn de inimigos
+        this.spawnTimer--;
+        if (this.spawnTimer <= 0) {
+            const maxGlobalEnemies = this.waveNumber * 2;
+
+            if (enemiesArray.length < maxGlobalEnemies) {
+                let patrolMin = this.x < 0 ? this.x : this.x - 400;
+                let patrolMax = this.x < 0 ? this.x + 400 : this.x;
+
+                enemiesArray.push(new Enemy(this.scene, this.x, this.y, [patrolMin, patrolMax]));
+            }
+            this.spawnTimer = this.spawnInterval;
+        }
+    }
+
+    takeDamage(amount) {
+        this.health -= amount;
+        this.material.color.setHex(0xffaaaa);
+        setTimeout(() => {
+            if (this.active) this.material.color.setHex(0xffffff);
+        }, 100);
+
+        if (this.health <= 0) {
+            this.destroy();
+        }
+    }
+
+    destroy() {
+        this.active = false;
+        this.scene.remove(this.mesh);
+        this.scene.remove(this.light);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+        this.texture.dispose();
+    }
+}
+
 // ==========================================
-// 2. CONFIGURAÇÃO SEGURA DE ÁUDIO
+// 4. CONFIGURAÇÃO SEGURA DE ÁUDIO
 // ==========================================
 const sounds = {
     bgm: new Audio('/music/music_track_1.ogg'),
     jump: new Audio('/sounds/jump.wav'),
     damage: new Audio('/sounds/damage.wav'),
-    shoot: new Audio('/sounds/player_shoot.wav'), 
+    shoot: new Audio('/sounds/player_shoot.wav'),
     win: new Audio('/sounds/win_track.wav')
 };
 sounds.bgm.loop = true;
@@ -94,10 +206,12 @@ sounds.bgm.volume = 0.3;
 
 function safePlay(audioObj) {
     if (audioObj && isMusicEnabled) {
-        audioObj.play().catch(erro => console.warn("Áudio bloqueado.", erro));
+        audioObj.play().catch(() => {});
     }
 }
+
 function safePlayEffect(audioObj) {
+    if (!isSfxEnabled) return;
     if (audioObj) {
         audioObj.currentTime = 0;
         audioObj.play().catch(() => {});
@@ -105,11 +219,18 @@ function safePlayEffect(audioObj) {
 }
 
 // ==========================================
-// 3. SETUP PRINCIPAL DA ENGINE
+// 5. SETUP PRINCIPAL DA ENGINE
 // ==========================================
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-WIDTH/2, WIDTH/2, HEIGHT/2, -HEIGHT/2, 0.1, 1000);
-camera.position.set(0, 0, 10); 
+const camera = new THREE.OrthographicCamera(
+    -WIDTH / 2,
+    WIDTH / 2,
+    HEIGHT / 2,
+    -HEIGHT / 2,
+    0.1,
+    1000
+);
+camera.position.set(0, 0, 10);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -118,7 +239,7 @@ document.body.appendChild(renderer.domElement);
 playerAuraLight = setupEnvironment(scene);
 
 // ==========================================
-// 4. INTEGRAÇÃO DE INTERFACE (UI)
+// 6. INTEGRAÇÃO DE INTERFACE (UI)
 // ==========================================
 const uiMenu = document.getElementById('menu-screen');
 const uiHud = document.getElementById('hud');
@@ -129,11 +250,27 @@ const uiWin = document.getElementById('win-screen');
 const hudHealth = document.getElementById('hud-health');
 const hudPhase = document.getElementById('hud-phase');
 
+// Botões e opções do MENU
+const btnStart = document.getElementById('btn-start');
+const btnOptions = document.getElementById('btn-options');
+const btnExit = document.getElementById('btn-exit');
+const menuOptions = document.getElementById('menu-options');
+const optMusic = document.getElementById('opt-music');
+const optSfx = document.getElementById('opt-sfx');
+
+// Botões e toggles do PAUSE
+const btnResume = document.getElementById('btn-resume');
+const btnPauseMenu = document.getElementById('btn-pause-menu');
+const btnPauseExit = document.getElementById('btn-pause-exit');
+const pauseMusicToggle = document.getElementById('pause-music-toggle');
+const pauseSfxToggle = document.getElementById('pause-sfx-toggle');
+
 function hideAllScreens() {
     [uiMenu, uiPaused, uiPhase, uiGameOver, uiWin].forEach(el => el?.classList.remove('active'));
 }
 
-document.getElementById('btn-start').addEventListener('click', () => {
+// ======= MENU INICIAL =======
+btnStart?.addEventListener('click', () => {
     hideAllScreens();
     uiHud.classList.add('active');
     currentPhase = 1;
@@ -142,41 +279,139 @@ document.getElementById('btn-start').addEventListener('click', () => {
     if (isMusicEnabled) safePlay(sounds.bgm);
 });
 
+btnOptions?.addEventListener('click', () => {
+    if (!menuOptions) return;
+    menuOptions.classList.toggle('hidden');
+});
+
+// Sincroniza flags de áudio com checkboxes do menu
+if (optMusic) optMusic.checked = isMusicEnabled;
+if (optSfx) optSfx.checked = isSfxEnabled;
+
+optMusic?.addEventListener('change', () => {
+    isMusicEnabled = optMusic.checked;
+    if (!isMusicEnabled) {
+        sounds.bgm.pause();
+    } else if (gameState === "playing") {
+        safePlay(sounds.bgm);
+    }
+    if (pauseMusicToggle) pauseMusicToggle.checked = isMusicEnabled;
+});
+
+optSfx?.addEventListener('change', () => {
+    isSfxEnabled = optSfx.checked;
+    if (pauseSfxToggle) pauseSfxToggle.checked = isSfxEnabled;
+});
+
+// Botão EXIT do menu inicial
+btnExit?.addEventListener('click', () => {
+    // Browsers modernos só permitem fechar janelas abertas via window.open(). [web:13][web:16][web:19]
+    window.close();
+    alert('Para sair do jogo, feche esta aba ou janela do navegador.');
+});
+
+// ======= PAUSE: sincroniza toggles =======
+function syncPauseToggles() {
+    if (pauseMusicToggle) pauseMusicToggle.checked = isMusicEnabled;
+    if (pauseSfxToggle) pauseSfxToggle.checked = isSfxEnabled;
+}
+
+// Botões do PAUSE
+btnResume?.addEventListener('click', () => {
+    gameState = "playing";
+    uiPaused.classList.remove('active');
+    if (isMusicEnabled) safePlay(sounds.bgm);
+});
+
+btnPauseMenu?.addEventListener('click', () => {
+    // Volta para o menu principal
+    gameState = "menu";
+    sounds.bgm.pause();
+    hideAllScreens();
+    uiMenu?.classList.add('active');
+});
+
+btnPauseExit?.addEventListener('click', () => {
+    window.close();
+    alert('Para sair do jogo, feche esta aba ou janela do navegador.');
+});
+
+// Alterações de áudio na tela de PAUSE
+pauseMusicToggle?.addEventListener('change', () => {
+    isMusicEnabled = pauseMusicToggle.checked;
+    if (!isMusicEnabled) {
+        sounds.bgm.pause();
+    } else if (gameState === "playing") {
+        safePlay(sounds.bgm);
+    }
+    if (optMusic) optMusic.checked = isMusicEnabled;
+});
+
+pauseSfxToggle?.addEventListener('change', () => {
+    isSfxEnabled = pauseSfxToggle.checked;
+    if (optSfx) optSfx.checked = isSfxEnabled;
+});
+
 // ==========================================
-// 5. MONITORAMENTO DO TECLADO
+// 7. MONITORAMENTO DO TECLADO (Z, X, C, ESC, ENTER)
 // ==========================================
 const keys = {};
 
 window.addEventListener('keydown', (e) => {
-    keys[e.key.toLowerCase()] = true;
+    const key = e.key.toLowerCase();
+    keys[key] = true;
 
-    if (e.key === 'Escape' && gameState === "playing") {
-        gameState = "paused";
-        uiPaused.classList.add('active');
-        sounds.bgm.pause();
-    } else if (e.key === 'Escape' && gameState === "paused") {
-        gameState = "playing";
-        uiPaused.classList.remove('active');
-        safePlay(sounds.bgm);
+    // ESC: pause / resume
+    if (key === 'escape') {
+        if (gameState === "playing") {
+            gameState = "paused";
+            uiPaused.classList.add('active');
+            sounds.bgm.pause();
+            syncPauseToggles();
+        } else if (gameState === "paused") {
+            gameState = "playing";
+            uiPaused.classList.remove('active');
+            if (isMusicEnabled) safePlay(sounds.bgm);
+        }
     }
 
-    if (e.key === 'Enter') {
+    // ENTER: sair de telas finais
+    if (key === 'enter') {
         if (gameState === "game_over" || gameState === "win") {
             hideAllScreens();
             uiHud.classList.remove('active');
-            uiMenu.classList.add('active');
+            uiMenu?.classList.add('active');
             gameState = "menu";
         }
     }
 
-    if (gameState === "playing" && (e.key.toLowerCase() === 'x' || e.key.toLowerCase() === 'k')) {
-        const MANA_COST = 25; 
-        
-        if (player && player.mana >= MANA_COST) {
-            player.mana -= MANA_COST;
+    if (gameState === "playing" && player) {
+        // [X] - ATAQUE BÁSICO (Sem custo)
+        if (key === 'x') {
             const direction = player.flipX ? -1 : 1;
-            playerProjectiles.push(new Projectile(scene, player.sprite.position.x, player.sprite.position.y, direction));
+            playerProjectiles.push(new Projectile(
+                scene,
+                player.sprite.position.x,
+                player.sprite.position.y,
+                direction
+            ));
             safePlayEffect(sounds.shoot);
+        }
+
+        // [C] - ATAQUE ESPECIAL / BOLA DE FOGO (40 Mana)
+        if (key === 'c') {
+            const MANA_COST = 40;
+            if (player.mana >= MANA_COST) {
+                player.mana -= MANA_COST;
+                const direction = player.flipX ? -1 : 1;
+                playerProjectiles.push(new Fireball(
+                    scene,
+                    player.sprite.position.x,
+                    player.sprite.position.y,
+                    direction
+                ));
+                safePlayEffect(sounds.shoot);
+            }
         }
     }
 });
@@ -186,60 +421,55 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ==========================================
-// 6. SISTEMA DE ONDAS, RANKING E SPAWN DINÂMICO
+// 8. SISTEMA DE ONDAS E SPAWN DE PORTAIS
 // ==========================================
 function spawnWave(waveNumber, levelData) {
     enemies.forEach(e => e.destroy());
     enemies = [];
-    
-    const maxEnemiesToSpawn = waveNumber * 2; 
-    let spawnedCount = 0;
+    portals.forEach(p => p.destroy());
+    portals = [];
 
-    if (levelData.enemiesSpawn) {
-        levelData.enemiesSpawn.forEach((spawnData) => {
-            if (spawnedCount >= maxEnemiesToSpawn) return;
+    const edgePoints = [
+        { x: -600, y: -170 },
+        { x: 600, y: -170 },
+        { x: -500, y: -10 },
+        { x: 500, y: -10 },
+        { x: -600, y: 155 },
+        { x: 600, y: 155 }
+    ];
 
-            let spawnX = spawnData.x;
-            let spawnY = spawnData.y;
-            let patrolRange = [...spawnData.patrol];
+    const shuffledEdges = edgePoints.sort(() => 0.5 - Math.random());
 
-            // LOGICA CRITICA: Verifica se o ponto está na visão do protagonista
-            if (player && player.sprite) {
-                const playerX = player.sprite.position.x;
-                
-                // Se a distância horizontal for menor que 420px, está visível!
-                if (Math.abs(spawnX - playerX) < 420) {
-                    // Empurra o inimigo para a ponta contrária da arena mantendo o Y estável
-                    if (playerX > 0) {
-                        spawnX = -Math.abs(spawnX); // Move para a esquerda da arena
-                    } else {
-                        spawnX = Math.abs(spawnX);  // Move para a direita da arena
-                    }
-                    
-                    // Ajusta o intervalo de inteligência de patrulha para o novo ponto X
-                    const patrolWidth = patrolRange[1] - patrolRange[0];
-                    patrolRange[0] = spawnX - patrolWidth / 2;
-                    patrolRange[1] = spawnX + patrolWidth / 2;
-                }
-            }
-
-            enemies.push(new Enemy(scene, spawnX, spawnY, patrolRange));
-            spawnedCount++;
-        });
+    for (let i = 0; i < waveNumber; i++) {
+        portals.push(new Portal(scene, shuffledEdges[i].x, shuffledEdges[i].y, waveNumber));
     }
 
     if (waveNumber === MAX_WAVES && levelData.guardianSpawn) {
-        enemies.push(new Guardian(scene, levelData.guardianSpawn.x, levelData.guardianSpawn.y, levelData.guardianSpawn.patrol));
+        let bossX = levelData.guardianSpawn.x;
+        let bossY = levelData.guardianSpawn.y;
+        let bossPatrol = [...levelData.guardianSpawn.patrol];
+
+        if (player && player.sprite) {
+            const playerX = player.sprite.position.x;
+            if (Math.abs(bossX - playerX) < 420) {
+                bossX = playerX > 0 ? -500 : 500;
+                const patrolWidth = bossPatrol[1] - bossPatrol[0];
+                bossPatrol[0] = bossX - patrolWidth / 2;
+                bossPatrol[1] = bossX + patrolWidth / 2;
+            }
+        }
+
+        enemies.push(new Guardian(scene, bossX, bossY, bossPatrol));
     }
 }
 
 function checkWaveProgress(levelData) {
-    if (enemies.length === 0 && currentWave <= MAX_WAVES) {
+    if (portals.length === 0 && enemies.length === 0 && currentWave <= MAX_WAVES) {
         if (currentWave === MAX_WAVES) {
             endPhaseWithVictory();
         } else {
             waveTransitionTimer++;
-            if (waveTransitionTimer >= 120) { 
+            if (waveTransitionTimer >= 120) {
                 waveTransitionTimer = 0;
                 currentWave++;
                 spawnWave(currentWave, levelData);
@@ -248,12 +478,46 @@ function checkWaveProgress(levelData) {
     }
 }
 
+// ==========================================
+// 9. DROP INTELIGENTE (UTILITY AI)
+// ==========================================
 function handleEnemyDefeatDrop(x, y) {
     totalEnemiesDefeated++;
-    const rand = Math.random();
-    if (rand < 0.15) droppedItems.push(new DroppedItem(scene, x, y, 'health'));
-    else if (rand >= 0.15 && rand < 0.30) droppedItems.push(new DroppedItem(scene, x, y, 'mana'));
-    else if (rand >= 0.30 && rand < 0.45) droppedItems.push(new DroppedItem(scene, x, y, 'buff'));
+
+    let dropChance = 0.45;
+    if (player && (player.health / player.maxHealth) < 0.25) {
+        dropChance = 0.60;
+    }
+
+    if (Math.random() > dropChance) return;
+
+    let weightHealth = 15;
+    let weightMana = 15;
+    let weightBuff = 15;
+
+    if (player) {
+        const hpRatio = player.health / player.maxHealth;
+        const manaRatio = player.mana / player.maxMana;
+
+        const needHealth = Math.pow(1.0 - hpRatio, 2);
+        const needMana = Math.pow(1.0 - manaRatio, 2);
+        const comfortLevel = hpRatio * manaRatio;
+
+        weightHealth += (needHealth * 100);
+        weightMana += (needMana * 100);
+        weightBuff += (comfortLevel * 120);
+    }
+
+    const totalWeight = weightHealth + weightMana + weightBuff;
+    const roll = Math.random() * totalWeight;
+
+    if (roll < weightHealth) {
+        droppedItems.push(new DroppedItem(scene, x, y, 'health'));
+    } else if (roll < weightHealth + weightMana) {
+        droppedItems.push(new DroppedItem(scene, x, y, 'mana'));
+    } else {
+        droppedItems.push(new DroppedItem(scene, x, y, 'buff'));
+    }
 }
 
 function calculateFinalRank(timeInSeconds, damageTaken) {
@@ -288,11 +552,13 @@ function endPhaseWithVictory() {
 }
 
 // ==========================================
-// 7. MECÂNICAS REATIVAS DO FLUXO
+// 10. MECÂNICAS REATIVAS DO FLUXO
 // ==========================================
 function resetGame() {
     enemies.forEach(e => e.destroy());
     enemies = [];
+    portals.forEach(p => p.destroy());
+    portals = [];
     playerProjectiles.forEach(p => p.destroy());
     playerProjectiles = [];
     droppedItems.forEach(i => i.destroy(scene));
@@ -311,13 +577,13 @@ function resetGame() {
     phaseStartTime = performance.now();
 
     if (!player) {
-        player = new Player(scene, 0, -100); 
+        player = new Player(scene, 0, -100);
     } else {
         player.sprite.position.set(0, -100, 0);
-        player.health = player.maxHealth; 
-        player.mana = player.maxMana;     
+        player.health = player.maxHealth;
+        player.mana = player.maxMana;
         player.vy = 0;
-        player.knockbackX = 0; 
+        player.knockbackX = 0;
         player.invulnerabilityTimer = 0;
         player.flashTimer = 0;
     }
@@ -334,11 +600,14 @@ function resetGame() {
 }
 
 function updateHUD() {
-    if(player) {
+    if (player) {
         const hpPercent = Math.max(0, (player.health / player.maxHealth) * 100);
         const manaPercent = Math.max(0, (player.mana / player.maxMana) * 100);
         const hpBarColor = isDamageBuffActive ? '#f1c40f' : '#e74c3c';
-        const waveText = waveTransitionTimer > 0 ? "PREPARANDO..." : `ONDA: ${currentWave}/${MAX_WAVES}`;
+
+        const waveText = waveTransitionTimer > 0
+            ? "PREPARANDO..."
+            : `ONDA: ${currentWave}/${MAX_WAVES} &nbsp;|&nbsp; PORTAIS ATIVOS: ${portals.length}`;
 
         hudHealth.innerHTML = `
             <div style="display: flex; align-items: center; gap: 15px;">
@@ -358,20 +627,25 @@ function updateHUD() {
                     ${waveText} <br> <span style="color:#f1c40f">${isDamageBuffActive ? '🔥 BUFF ATIVO!' : ''}</span>
                 </div>
             </div>
+
+            <div style="position: fixed; top: 20px; right: 20px; text-align: right; color: white; font-family: sans-serif; font-size: 16px; text-shadow: 2px 2px 0 #000; z-index: 1000;">
+                <span style="color: #2ecc71; font-weight: bold;">Z</span> : Pulo<br>
+                <span style="color: #e74c3c; font-weight: bold;">X</span> : Ataque Básico<br>
+                <span style="color: #3498db; font-weight: bold;">C</span> : Bola de Fogo <span style="color: #aaa; font-size: 14px;">(40 Mana)</span>
+            </div>
         `;
     }
-    
+
     hudPhase.innerText = `ARENA: ${currentPhase}`;
 }
 
 // ==========================================
-// 8. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
+// 11. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
 // ==========================================
 function animate() {
     requestAnimationFrame(animate);
 
     if (gameState === "playing" && player) {
-        
         if (currentLevelDataCache) {
             checkWaveProgress(currentLevelDataCache);
         }
@@ -381,29 +655,36 @@ function animate() {
             if (buffDamageTimer <= 0) isDamageBuffActive = false;
         }
 
+        portals.forEach(p => p.update(enemies));
+
+        // plataformas móveis
         movingPlatforms.forEach(p => {
             const delta = p.speed * p.direction;
             p.mesh.position.x += delta;
-            p.mesh.deltaX = delta; 
+            p.mesh.deltaX = delta;
             if (Math.abs(p.mesh.position.x - p.startX) > p.rangeX) {
-                p.direction *= -1; 
+                p.direction *= -1;
             }
         });
 
+        // obstáculos giratórios
         rotatingObstacles.forEach(o => { o.mesh.rotation.z += o.speed; });
 
+        // colisores ativos
         const activeColliders = [...platformsData, ...movingPlatforms.map(p => p.mesh)];
 
+        // update jogador
         const prevHealth = player.health;
         player.update(keys, activeColliders, GRAVITY, sounds);
         if (player.health < prevHealth) totalDamageTaken += (prevHealth - player.health);
-        
+
         if (playerAuraLight) {
             playerAuraLight.position.set(player.sprite.position.x, player.sprite.position.y, 50);
         }
 
         updateCamera(camera, player, WIDTH);
 
+        // inimigos
         for (let i = enemies.length - 1; i >= 0; i--) {
             let e = enemies[i];
             e.update(player.sprite.position, activeColliders, GRAVITY);
@@ -415,33 +696,74 @@ function animate() {
             }
         }
 
+        // projéteis do jogador
         for (let i = playerProjectiles.length - 1; i >= 0; i--) {
             let p = playerProjectiles[i];
             p.update();
 
             let hit = false;
-            for (let j = enemies.length - 1; j >= 0; j--) {
-                let e = enemies[j];
-                if (p.mesh.position.distanceTo(e.sprite.position) < 65) { 
-                    
-                    const damage = isDamageBuffActive ? 0.50 : 0.25;
-                    e.takeDamage(damage, sounds, p.mesh.position.x);
-                    
-                    hit = true;
-                    if (e.health <= 0) {
-                        handleEnemyDefeatDrop(e.sprite.position.x, e.sprite.position.y);
-                        e.destroy(); 
-                        enemies.splice(j, 1);
+
+            // colisão com portais
+            for (let k = portals.length - 1; k >= 0; k--) {
+                let portal = portals[k];
+                if (p.mesh.position.distanceTo(portal.mesh.position) < 40) {
+
+                    if (p.isPiercing && p.hitTargets && p.hitTargets.has(portal)) continue;
+
+                    let damage = isDamageBuffActive ? 0.50 : 0.25;
+                    if (p.isPiercing) damage *= 3;
+
+                    portal.takeDamage(damage);
+
+                    if (p.isPiercing) {
+                        p.hitTargets.add(portal);
+                    } else {
+                        hit = true;
                     }
-                    break;
+
+                    if (!portal.active) {
+                        portals.splice(k, 1);
+                    }
+                    if (hit) break;
                 }
             }
+
+            // colisão com inimigos
+            if (!hit) {
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    let e = enemies[j];
+                    if (p.mesh.position.distanceTo(e.sprite.position) < 65) {
+
+                        if (p.isPiercing && p.hitTargets && p.hitTargets.has(e)) continue;
+
+                        let damage = isDamageBuffActive ? 0.50 : 0.25;
+                        if (p.isPiercing) damage *= 4;
+
+                        e.takeDamage(damage, sounds, p.mesh.position.x);
+
+                        if (p.isPiercing) {
+                            p.hitTargets.add(e);
+                        } else {
+                            hit = true;
+                        }
+
+                        if (e.health <= 0) {
+                            handleEnemyDefeatDrop(e.sprite.position.x, e.sprite.position.y);
+                            e.destroy();
+                            enemies.splice(j, 1);
+                        }
+                        if (hit) break;
+                    }
+                }
+            }
+
             if (hit || !p.active) {
                 p.destroy();
                 playerProjectiles.splice(i, 1);
             }
         }
 
+        // itens dropados
         for (let i = droppedItems.length - 1; i >= 0; i--) {
             let item = droppedItems[i];
             item.update();
@@ -453,7 +775,7 @@ function animate() {
                     isDamageBuffActive = true;
                     buffDamageTimer = 360;
                 }
-                safePlayEffect(sounds.win); 
+                safePlayEffect(sounds.win);
                 item.destroy(scene);
                 droppedItems.splice(i, 1);
                 continue;
@@ -465,6 +787,7 @@ function animate() {
             }
         }
 
+        // morte / queda
         if (player.health <= 0 || player.sprite.position.y < -400) {
             gameState = "game_over";
             uiGameOver.classList.add('active');

@@ -12,10 +12,13 @@ export class Player extends Character {
         this.invulnerabilityDuration = 120; 
         this.flashDuration = 0; 
 
-        // O SISTEMA DE MANA QUE ESTAVA A FALTAR!
+        // O SISTEMA DE MANA
         this.maxMana = 100;
         this.mana = 100;
-        this.manaRegenRate = 0.5; // Recupera a mana devagarinho a cada frame
+        this.manaRegenRate = 0.02; // Recupera a mana devagarinho a cada frame
+
+        // NOVO: SISTEMA DE REGENERAÇÃO DE VIDA PASSIVA
+        this.healthRegenRate = 0.001; // A vida recupera mais devagar que a mana (aprox. 1 HP a cada 8 segundos)
 
         this.animations = {
             "idle": this._loadAnimationFrames("player/player_idle", 18), 
@@ -32,6 +35,12 @@ export class Player extends Character {
         // Recuperação passiva da Mana
         if (this.mana < this.maxMana) {
             this.mana = Math.min(this.maxMana, this.mana + this.manaRegenRate);
+        }
+
+        // NOVO: Recuperação passiva da Vida (HP)
+        // Só regenera se estiver vivo (vida > 0) e abaixo do máximo
+        if (this.health > 0 && this.health < this.maxHealth) {
+            this.health = Math.min(this.maxHealth, this.health + this.healthRegenRate);
         }
 
         // Mecânica de queda das plataformas One-Way
