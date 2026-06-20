@@ -15,7 +15,7 @@ export class Player extends Character {
         // O SISTEMA DE MANA QUE ESTAVA A FALTAR!
         this.maxMana = 100;
         this.mana = 100;
-        this.manaRegenRate = 0.3; // Recupera a mana devagarinho a cada frame
+        this.manaRegenRate = 0.2; // Recupera a mana devagarinho a cada frame
 
         this.animations = {
             "idle": this._loadAnimationFrames("player/player_idle", 18), 

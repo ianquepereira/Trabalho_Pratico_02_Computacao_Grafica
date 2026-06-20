@@ -1,11 +1,9 @@
 import * as THREE from 'three';
-// ATUALIZADO: Importações modulares apontando para a nova pasta 'characters'
 import { Player } from './characters/Player.js';
 import { Enemy } from './characters/Enemy.js';
 import { Guardian } from './characters/Guardian.js';
-// REMOVIDO: A importação do Trap
-import { Coin } from './Interactables.js';
 import { setupEnvironment, updateCamera, buildLevel } from './scene.js';
+import { Projectile } from './combat/Projectile.js';
 
 // ==========================================
 // 1. CONSTANTES E VARIÁVEIS GLOBAIS
@@ -25,9 +23,6 @@ let playerProjectiles = [];
 let platformsData = []; 
 let movingPlatforms = [];
 let rotatingObstacles = [];
-
-let coins = [];
-let coinsCollected = 0;
 
 let leverMesh = null;
 let gateMesh = null;
@@ -75,37 +70,7 @@ document.body.appendChild(renderer.domElement);
 playerAuraLight = setupEnvironment(scene);
 
 // ==========================================
-// 4. CLASSES AUXILIARES (Projéteis)
-// ==========================================
-class Projectile {
-    constructor(startX, startY, direction) {
-        this.direction = direction;
-        this.speed = 10;
-        this.startX = startX;
-        this.maxRange = 400;
-        this.active = true;
-
-        const geometry = new THREE.BoxGeometry(20, 8, 1);
-        const material = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-        this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.position.set(startX, startY, 0);
-        scene.add(this.mesh);
-    }
-    update() {
-        this.mesh.position.x += this.speed * this.direction;
-        if (Math.abs(this.mesh.position.x - this.startX) > this.maxRange) {
-            this.active = false;
-        }
-    }
-    destroy() {
-        scene.remove(this.mesh);
-        this.mesh.geometry.dispose();
-        this.mesh.material.dispose();
-    }
-}
-
-// ==========================================
-// 5. INTEGRAÇÃO DE INTERFACE (UI)
+// 4. INTEGRAÇÃO DE INTERFACE (UI)
 // ==========================================
 const uiMenu = document.getElementById('menu-screen');
 const uiHud = document.getElementById('hud');
@@ -130,7 +95,7 @@ document.getElementById('btn-start').addEventListener('click', () => {
 });
 
 // ==========================================
-// 6. MONITORAMENTO DO TECLADO
+// 5. MONITORAMENTO DO TECLADO
 // ==========================================
 const keys = {};
 
@@ -163,7 +128,7 @@ window.addEventListener('keydown', (e) => {
             player.mana -= MANA_COST;
             
             const direction = player.flipX ? -1 : 1;
-            playerProjectiles.push(new Projectile(player.sprite.position.x, player.sprite.position.y, direction));
+            playerProjectiles.push(new Projectile(scene, player.sprite.position.x, player.sprite.position.y, direction));
             safePlayEffect(sounds.shoot);
         }
     }
@@ -174,17 +139,13 @@ window.addEventListener('keyup', (e) => {
 });
 
 // ==========================================
-// 7. MECÂNICAS REATIVAS DO FLUXO
+// 6. MECÂNICAS REATIVAS DO FLUXO
 // ==========================================
 function resetGame() {
     enemies.forEach(e => e.destroy());
     enemies = [];
     playerProjectiles.forEach(p => p.destroy());
     playerProjectiles = [];
-    
-    coins.forEach(c => c.destroy());
-    coins = [];
-    coinsCollected = 0;
 
     platformsData.forEach(p => scene.remove(p));
     movingPlatforms.forEach(p => scene.remove(p.mesh));
@@ -195,7 +156,6 @@ function resetGame() {
     isLeverActivated = false;
     isGuardianDefeated = false;
 
-    // ATUALIZADO: Nasce em -850 para não ver a borda do mapa
     if (!player) {
         player = new Player(scene, -850, -50); 
     } else {
@@ -230,12 +190,6 @@ function resetGame() {
         enemies.push(new Guardian(scene, levelData.guardianSpawn.x, levelData.guardianSpawn.y, levelData.guardianSpawn.patrol));
     }
 
-    if (levelData.coinsSpawn) {
-        levelData.coinsSpawn.forEach(spawnData => {
-            coins.push(new Coin(scene, spawnData.x, spawnData.y));
-        });
-    }
-
     updateHUD();
 }
 
@@ -258,9 +212,6 @@ function updateHUD() {
                         </div>
                     </div>
                 </div>
-                <div style="color: #fff; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 0px #000;">
-                    🪙 x ${coinsCollected} <span style="font-size: 14px; color: #aaa;">/10</span>
-                </div>
             </div>
         `;
     }
@@ -269,7 +220,7 @@ function updateHUD() {
 }
 
 // ==========================================
-// 8. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
+// 7. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
 // ==========================================
 function animate() {
     requestAnimationFrame(animate);
@@ -320,7 +271,7 @@ function animate() {
                 let e = enemies[j];
                 if (p.mesh.position.distanceTo(e.sprite.position) < 65) { 
                     
-                    e.takeDamage(1, sounds, p.mesh.position.x);
+                    e.takeDamage(0.25, sounds, p.mesh.position.x);
                     
                     hit = true;
                     if (e.health <= 0) {
@@ -333,25 +284,6 @@ function animate() {
             if (hit || !p.active) {
                 p.destroy();
                 playerProjectiles.splice(i, 1);
-            }
-        }
-
-        for (let i = coins.length - 1; i >= 0; i--) {
-            let c = coins[i];
-            c.update(); 
-
-            if (player.hitbox.intersectsBox(c.hitbox)) {
-                c.destroy();
-                coins.splice(i, 1);
-                coinsCollected++;
-                
-                safePlayEffect(sounds.jump); 
-
-                if (coinsCollected >= 10) {
-                    player.health = Math.min(player.maxHealth, player.health + 1);
-                    coinsCollected = 0;
-                    safePlayEffect(sounds.win); 
-                }
             }
         }
 

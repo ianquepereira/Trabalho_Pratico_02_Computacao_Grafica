@@ -1,37 +1,208 @@
 import * as THREE from 'three';
 
 const textureLoader = new THREE.TextureLoader();
+const TILE_SIZE = 32;
 
 // ==========================================
-// FUNÇÃO AUXILIAR PARA TEXTURAS REPETITIVAS (TILES)
+// 1. CARREGAMENTO DOS TILES, ROCHAS E ÁRVORES
 // ==========================================
-function createTiledMaterial(texturePath, width, height, tileSize = 32, alignTop = false) {
-    const texture = textureLoader.load(texturePath).clone();
-    texture.needsUpdate = true;
-    
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    
-    const repeatY = height / tileSize;
-    texture.repeat.set(width / tileSize, repeatY);
-    
-    if (alignTop) {
-        texture.offset.y = 1 - (repeatY % 1);
-    }
-
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-
-    return new THREE.MeshStandardMaterial({ 
-        map: texture,
-        color: 0xffffff, 
-        roughness: 0.8,
-        metalness: 0.0
+const tileMaterials = {};
+for (let i = 1; i <= 72; i++) {
+    const num = i.toString().padStart(2, '0'); 
+    const tex = textureLoader.load(`/images/1_Tiles/Tile_${num}.png`);
+    tex.magFilter = THREE.NearestFilter; 
+    tex.minFilter = THREE.NearestFilter;
+    tileMaterials[`Tile_${num}`] = new THREE.MeshStandardMaterial({ 
+        map: tex, 
+        transparent: true, 
+        alphaTest: 0.5, // Remove artefatos de renderização transparente
+        color: 0xffffff, roughness: 0.8, metalness: 0.0
     });
 }
 
+const stoneMaterials = {};
+for (let i = 1; i <= 6; i++) {
+    const tex = textureLoader.load(`/images/Stones/${i}.png`);
+    tex.magFilter = THREE.NearestFilter; 
+    tex.minFilter = THREE.NearestFilter;
+    stoneMaterials[`Stone_${i}`] = new THREE.MeshStandardMaterial({ 
+        map: tex, 
+        transparent: true, 
+        alphaTest: 0.5,
+        color: 0xffffff, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide
+    });
+}
+
+const treeMaterials = {};
+for (let i = 1; i <= 18; i++) {
+    const tex = textureLoader.load(`/images/Trees/${i}.png`);
+    tex.magFilter = THREE.NearestFilter; 
+    tex.minFilter = THREE.NearestFilter;
+    treeMaterials[`Tree_${i}`] = new THREE.MeshStandardMaterial({ 
+        map: tex, 
+        transparent: true, 
+        alphaTest: 0.5, // Remove a "caixa de vidro" opaca ao redor das folhas
+        color: 0xffffff, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide
+    });
+}
+
+const tileGeometry = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
+
 // ==========================================
-// 1. CONFIGURAÇÃO DO AMBIENTE E FUNDO
+// 2. GERADOR DE PLATAFORMAS FIXAS COM DECORAÇÃO INTELIGENTE
+// ==========================================
+function buildVisualPlatform(width, height, isFloating = false) {
+    const group = new THREE.Group();
+    
+    const cols = Math.max(1, Math.round(width / TILE_SIZE));
+    let rows = Math.max(1, Math.round(height / TILE_SIZE));
+    
+    // Se não for flutuante, esticamos a parede/chão para baixo para não ver o vazio
+    if (!isFloating) rows += 25; 
+
+    const actualWidth = cols * TILE_SIZE;
+    const actualHeight = rows * TILE_SIZE;
+
+    const startX = -actualWidth / 2 + TILE_SIZE / 2;
+    const startY = actualHeight / 2 - TILE_SIZE / 2;
+
+    let skipDecals = 0; 
+
+    for (let row = 0; row < rows; row++) {
+        if (row === 0) skipDecals = 0; // Reinicia o espaçador no topo
+        
+        for (let col = 0; col < cols; col++) {
+            let tileName = 'Tile_11'; 
+
+            // Estrutura de Autotiling baseada nas suas diretrizes
+            if (row === 0) { 
+                if (col === 0) tileName = 'Tile_01';
+                else if (col === cols - 1) tileName = 'Tile_04';
+                else tileName = (col % 2 === 0) ? 'Tile_02' : 'Tile_03';
+            } else if (row === rows - 1 && isFloating) {
+                if (col === 0) tileName = 'Tile_19';
+                else if (col === cols - 1) tileName = 'Tile_22';
+                else tileName = (col % 2 === 0) ? 'Tile_20' : 'Tile_21';
+            } else { 
+                if (col === 0) tileName = 'Tile_10';
+                else if (col === cols - 1) tileName = 'Tile_13';
+                else tileName = (col % 2 === 0) ? 'Tile_11' : 'Tile_12';
+            }
+
+            if (rows === 1) {
+                if (col === 0) tileName = 'Tile_01';
+                else if (col === cols - 1) tileName = 'Tile_04';
+                else tileName = (col % 2 === 0) ? 'Tile_02' : 'Tile_03';
+            }
+
+            const mesh = new THREE.Mesh(tileGeometry, tileMaterials[tileName]);
+            mesh.position.set(startX + col * TILE_SIZE, startY - row * TILE_SIZE, 0);
+            group.add(mesh);
+
+            // LOGICA DOS ELEMENTOS DECORATIVOS (APENAS NO TOPO)
+            if (row === 0) {
+                if (skipDecals > 0) {
+                    skipDecals--;
+                    continue; 
+                }
+
+                const isEdge = (col === 0 || col === cols - 1);
+                const randomVal = Math.random();
+                
+                // 1. ÁRVORES (10% de hipótese por bloco disponível)
+                if (!isEdge && col < cols - 2 && randomVal < 0.10) {
+                    const treeNum = Math.floor(Math.random() * 18) + 1; 
+                    
+                    let tWidth = 80;   
+                    let tHeight = 128; 
+                    let yOffset = -16; // Ajuste para enterrar o tronco perfeitamente na grama
+                    
+                    if ([14, 15].includes(treeNum)) {
+                        tWidth = 44; // Troncos secos finos
+                        skipDecals = 1;
+                    } else if ([13, 16, 17].includes(treeNum)) {
+                        tWidth = 48; // Tocos cortados rasteiros
+                        tHeight = 48;
+                        yOffset = -6; 
+                        skipDecals = 1;
+                    } else {
+                        skipDecals = 2; // Árvores normais reservam espaço lateral para evitar sobreposição
+                    }
+
+                    const treeMesh = new THREE.Mesh(
+                        new THREE.PlaneGeometry(tWidth, tHeight), 
+                        treeMaterials[`Tree_${treeNum}`]
+                    );
+                    
+                    const treeY = (startY - row * TILE_SIZE) + (TILE_SIZE / 2) + (tHeight / 2) + yOffset;
+                    // Profundidade Z (-0.1) faz com que fiquem ligeiramente atrás do jogador
+                    treeMesh.position.set(startX + col * TILE_SIZE + (TILE_SIZE / 2), treeY, -0.1);
+                    group.add(treeMesh);
+                } 
+                // 2. PEDRAS (15% de hipótese)
+                else if (!isEdge && randomVal >= 0.10 && randomVal < 0.25) {
+                    const stoneNum = Math.floor(Math.random() * 6) + 1; 
+                    const rockWidth = TILE_SIZE * 0.8;
+                    const rockHeight = TILE_SIZE * 0.5; 
+                    
+                    const stoneMesh = new THREE.Mesh(
+                        new THREE.PlaneGeometry(rockWidth, rockHeight), 
+                        stoneMaterials[`Stone_${stoneNum}`]
+                    );
+                    
+                    const rockY = (startY - row * TILE_SIZE) + (TILE_SIZE / 2) + (rockHeight / 2) - 2;
+                    stoneMesh.position.set(startX + col * TILE_SIZE, rockY, 0.05);
+                    group.add(stoneMesh);
+                    
+                    skipDecals = 1; 
+                } 
+                // 3. MATINHO RASTEIRO (35% de hipótese)
+                else if (randomVal > 0.65) {
+                    const grassOptions = ['Tile_06', 'Tile_07', 'Tile_08', 'Tile_35'];
+                    const randomGrass = grassOptions[Math.floor(Math.random() * grassOptions.length)];
+                    
+                    const grassMesh = new THREE.Mesh(tileGeometry, tileMaterials[randomGrass]);
+                    grassMesh.position.set(startX + col * TILE_SIZE, startY - row * TILE_SIZE + TILE_SIZE, 0.1);
+                    group.add(grassMesh);
+                }
+            }
+        }
+    }
+    return { group, actualHeight };
+}
+
+// ==========================================
+// 3. GERADOR DE PLATAFORMAS FLUTUANTES MÓVEIS (23 ATÉ 26)
+// ==========================================
+function buildFloatingPlatform(width, height) {
+    const group = new THREE.Group();
+    
+    const cols = Math.max(1, Math.round(width / TILE_SIZE));
+    const rows = Math.max(1, Math.round(height / TILE_SIZE));
+
+    const actualWidth = cols * TILE_SIZE;
+    const actualHeight = rows * TILE_SIZE;
+
+    const startX = -actualWidth / 2 + TILE_SIZE / 2;
+    const startY = actualHeight / 2 - TILE_SIZE / 2;
+
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            let tileName = 'Tile_24'; 
+            if (col === 0) tileName = 'Tile_23'; 
+            else if (col === cols - 1) tileName = 'Tile_26'; 
+            else tileName = (col % 2 === 1) ? 'Tile_24' : 'Tile_25'; 
+
+            const mesh = new THREE.Mesh(tileGeometry, tileMaterials[tileName]);
+            mesh.position.set(startX + col * TILE_SIZE, startY - row * TILE_SIZE, 0);
+            group.add(mesh);
+        }
+    }
+    return { group, actualHeight };
+}
+
+// ==========================================
+// 4. CONFIGURAÇÃO DO AMBIENTE E FUNDO
 // ==========================================
 export function setupEnvironment(scene) {
     scene.fog = new THREE.FogExp2(0x5c94fc, 0.0015); 
@@ -40,17 +211,10 @@ export function setupEnvironment(scene) {
     const bgTexture = textureLoader.load('/images/background_far.png');
     bgTexture.wrapS = THREE.RepeatWrapping;
     bgTexture.wrapT = THREE.RepeatWrapping;
-    // Repete o fundo 6 vezes para cobrir o mapa todo com margem de sobra
     bgTexture.repeat.set(6, 1); 
     bgTexture.magFilter = THREE.NearestFilter;
 
-    const bgMaterial = new THREE.MeshBasicMaterial({ 
-        map: bgTexture,
-        depthWrite: false, 
-        transparent: true
-    });
-    
-    // Alargámos o plano infinitamente para a direita
+    const bgMaterial = new THREE.MeshBasicMaterial({ map: bgTexture, depthWrite: false, transparent: true });
     const bgGeometry = new THREE.PlaneGeometry(6000, 1000);
     const bgMesh = new THREE.Mesh(bgGeometry, bgMaterial);
     bgMesh.position.set(1000, 100, -80); 
@@ -71,66 +235,51 @@ export function setupEnvironment(scene) {
 }
 
 // ==========================================
-// 2. ESTRUTURA DE DESIGN DE NÍVEIS (LEVEL MAPS)
+// 5. DESIGN DO NÍVEL (PULO RECALIBRADO)
 // ==========================================
 export const LEVEL_MAPS = {
     1: {
         staticPlatforms: [
-            // PAREDE INVISÍVEL ESQUERDA (Bloqueio Inicial)
-            { x: -1000, y: 0, width: 40, height: 1000, oneWay: false, isWall: true },
+            { x: -1000, y: 0, width: 40, height: 1000, isWall: true },
+
+            { x: -700, y: -150, width: 600, height: 128, isFloating: false },
+            { x: -200, y: -150, width: 200, height: 128, isFloating: false },
+            { x: 300, y: -100, width: 250, height: 128, isFloating: false },
             
-            // 1. Zona Segura Inicial (Esticada para fechar o buraco do poço)
-            { x: -750, y: -150, width: 500, height: 40, oneWay: false }, 
+            // Degraus flutuantes com alturas acessíveis
+            { x: 550, y: -40, width: 128, height: 64, isFloating: true },
+            { x: 750, y: 20, width: 128, height: 64, isFloating: true },
             
-            { x: -400, y: -60, width: 80, height: 20, oneWay: true },
-            { x: -50, y: -150, width: 500, height: 40, oneWay: false },
-            { x: 750, y: -150, width: 500, height: 40, oneWay: false },
-            { x: 750, y: -40, width: 250, height: 20, oneWay: true },
-            { x: 1800, y: -150, width: 800, height: 40, oneWay: false },
-            
-            // PAREDE INVISÍVEL DIREITA (Bloqueio Final Atrás do Boss)
-            { x: 2200, y: 0, width: 40, height: 1000, oneWay: false, isWall: true }
+            { x: 1000, y: 60, width: 300, height: 128, isFloating: false },
+            { x: 1600, y: -150, width: 800, height: 128, isFloating: false },
+
+            { x: 2050, y: 0, width: 40, height: 1000, isWall: true }
         ],
         movingPlatforms: [
-            { x: 350, y: -100, width: 100, height: 20, rangeX: 100, speed: 1.5, currentDir: 1, startX: 350, oneWay: true },
-            { x: 1100, y: -80, width: 80, height: 20, rangeX: 60, speed: 2.0, currentDir: -1, startX: 1100, oneWay: true },
-            { x: 1300, y: -80, width: 80, height: 20, rangeX: 60, speed: 2.0, currentDir: 1, startX: 1300, oneWay: true }
+            { x: 50, y: -120, width: 128, height: 32, rangeX: 60, speed: 1.5, currentDir: 1, startX: 50 }
         ],
         rotatingObstacles: [],
-        coinsSpawn: [
-            { x: -700, y: -100 }, { x: -400, y: -10 },  { x: -200, y: -30 },  
-            { x: 100, y: -100 },  { x: 350, y: -50 },   { x: 600, y: -100 },  
-            { x: 750, y: 10 },    { x: 900, y: -100 },  { x: 1100, y: -30 },  
-            { x: 1300, y: -30 },  { x: 1550, y: -50 }   
-        ],
         enemiesSpawn: [
-            { x: -50, y: -50, patrol: [-250, 150] },   
-            { x: 800, y: -50, patrol: [600, 950] }     
+            { x: 300, y: -50, patrol: [220, 380] },   
+            { x: 1000, y: 150, patrol: [900, 1100] }     
         ],
-        guardianSpawn: { x: 1800, y: -50, patrol: [1500, 2100] },
-        leverPos: { x: 2050, y: -110 },
-        gatePos: { x: 2150, y: -50 } 
+        guardianSpawn: { x: 1700, y: -50, patrol: [1400, 1850] },
+        leverPos: { x: 1900, y: -120 },
+        gatePos: { x: 1950, y: -50 } 
     }
 };
 
 // ==========================================
-// 3. FÁBRICA DE CENÁRIOS (BUILD LEVEL)
+// 6. FÁBRICA DE CENÁRIOS (BUILD LEVEL)
 // ==========================================
 export function buildLevel(scene, phaseNum) {
     const map = LEVEL_MAPS[phaseNum] || LEVEL_MAPS[1]; 
     
     const levelData = {
-        platformsData: [],
-        movingPlatforms: [],
-        rotatingObstacles: [],
-        leverMesh: null,
-        gateMesh: null,
-        enemiesSpawn: map.enemiesSpawn || [], 
-        guardianSpawn: map.guardianSpawn,
-        coinsSpawn: map.coinsSpawn || []
+        platformsData: [], movingPlatforms: [], rotatingObstacles: [],
+        leverMesh: null, gateMesh: null,
+        enemiesSpawn: map.enemiesSpawn || [], guardianSpawn: map.guardianSpawn
     };
-
-    const topHeight = 20; 
 
     map.staticPlatforms.forEach(data => {
         const hitboxGeo = new THREE.PlaneGeometry(data.width, data.height);
@@ -138,31 +287,13 @@ export function buildLevel(scene, phaseNum) {
         const mesh = new THREE.Mesh(hitboxGeo, hitboxMat);
         mesh.position.set(data.x, data.y, 0);
         
-        mesh.width = data.width;
-        mesh.height = data.height;
-        mesh.oneWay = data.oneWay; 
+        mesh.width = data.width; mesh.height = data.height; mesh.oneWay = data.oneWay || false; 
 
-        // SÓ ADICIONA TEXTURA SE NÃO FOR UMA PAREDE INVISÍVEL
         if (!data.isWall) {
-            const grassMat = createTiledMaterial('/images/grass_tile.png', data.width, topHeight, 32, true);
-            const grassGeo = new THREE.PlaneGeometry(data.width, topHeight);
-            const grassMesh = new THREE.Mesh(grassGeo, grassMat);
-            grassMesh.position.set(0, (data.height / 2) - (topHeight / 2), -0.1); 
-            mesh.add(grassMesh); 
-
-            if (data.y < -100) {
-                const dirtTop = (data.height / 2) - topHeight; 
-                const deepBottom = -1000; 
-                const globalDirtTop = data.y + dirtTop;
-                const baseHeight = globalDirtTop - deepBottom;
-
-                const dirtMat = createTiledMaterial('/images/dirt_tile.png', data.width, baseHeight, 32, false);
-                const dirtGeo = new THREE.PlaneGeometry(data.width, baseHeight);
-                const dirtMesh = new THREE.Mesh(dirtGeo, dirtMat);
-                const localDirtCenterY = dirtTop - (baseHeight / 2);
-                dirtMesh.position.set(0, localDirtCenterY, -0.1);
-                mesh.add(dirtMesh); 
-            }
+            const isFloating = data.isFloating === true;
+            const { group: visualGroup, actualHeight } = buildVisualPlatform(data.width, data.height, isFloating);
+            visualGroup.position.set(0, (data.height / 2) - (actualHeight / 2), -0.1);
+            mesh.add(visualGroup); 
         }
 
         scene.add(mesh);
@@ -170,25 +301,21 @@ export function buildLevel(scene, phaseNum) {
     });
 
     map.movingPlatforms.forEach(data => {
-        const mat = createTiledMaterial('/images/dirt_tile.png', data.width, data.height, 32, true);
-        const geo = new THREE.PlaneGeometry(data.width, data.height);
-        const mesh = new THREE.Mesh(geo, mat);
-        
+        const hitboxGeo = new THREE.PlaneGeometry(data.width, data.height);
+        const hitboxMat = new THREE.MeshBasicMaterial({ visible: false }); 
+        const mesh = new THREE.Mesh(hitboxGeo, hitboxMat);
         mesh.position.set(data.x, data.y, 0);
-        mesh.width = data.width;
-        mesh.height = data.height;
-        mesh.deltaX = 0; 
-        mesh.oneWay = data.oneWay; 
+        
+        mesh.width = data.width; mesh.height = data.height; mesh.deltaX = 0; mesh.oneWay = data.oneWay || false; 
+
+        const { group: visualGroup, actualHeight } = buildFloatingPlatform(data.width, data.height);
+        visualGroup.position.set(0, (data.height / 2) - (actualHeight / 2), -0.1);
+        mesh.add(visualGroup);
         scene.add(mesh);
 
         levelData.movingPlatforms.push({
-            mesh: mesh,
-            width: data.width,
-            height: data.height,
-            rangeX: data.rangeX,
-            speed: data.speed,
-            direction: data.currentDir,
-            startX: data.startX
+            mesh: mesh, width: data.width, height: data.height, rangeX: data.rangeX,
+            speed: data.speed, direction: data.currentDir, startX: data.startX
         });
     });
 
@@ -208,30 +335,21 @@ export function buildLevel(scene, phaseNum) {
 }
 
 // ==========================================
-// 4. MANIPULAÇÃO DE CÂMERA (Novo Clamping e Deadzone)
+// 7. MANIPULAÇÃO DE CÂMERA
 // ==========================================
 export function updateCamera(camera, player, screenWidth) {
     if (!player || !player.sprite) return;
     
     let targetX = camera.position.x;
-    const deadzone = 80; // A câmera só se move se o jogador andar mais de 80 pixels do centro
+    const deadzone = 80;
 
-    // 1. ZONA MORTA (Deadzone)
     if (player.sprite.position.x > camera.position.x + deadzone) {
         targetX = player.sprite.position.x - deadzone;
     } else if (player.sprite.position.x < camera.position.x - deadzone) {
         targetX = player.sprite.position.x + deadzone;
     }
 
-    // 2. CLAMPING (Impede a câmera de mostrar o abismo azul fora do mapa)
-    // Se a parede invisível esquerda está em -1000 e a tela tem 800px (400px pra cada lado), 
-    // a câmera não pode ir abaixo de -600.
-    const minCamX = -600; 
-    const maxCamX = 1800; 
-    
-    // Trava o alvo entre o mínimo e o máximo
+    const minCamX = -600; const maxCamX = 2000; 
     targetX = Math.max(minCamX, Math.min(maxCamX, targetX));
-
-    // 3. SUAVIZAÇÃO (Lerp)
     camera.position.x += (targetX - camera.position.x) * 0.1;
 }
