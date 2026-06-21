@@ -8,7 +8,7 @@ import { setupEnvironment, updateCamera, buildLevel } from './scene.js';
 import { Projectile, Fireball } from './combat/Projectile.js';
 
 // ==========================================
-// 1. CARREGAMENTO DE TEXTURAS (DROPS E PORTAL)
+// 1. CARREGAMENTO DE TEXTURAS (DROPS, PORTAL E FUMO)
 // ==========================================
 const textureLoader = new THREE.TextureLoader();
 
@@ -27,12 +27,29 @@ Object.values(itemTextures).forEach(tex => {
 portalTextureBase.magFilter = THREE.NearestFilter;
 portalTextureBase.minFilter = THREE.NearestFilter;
 
+// --- CARREGAMENTO DOS FRAMES DE FUMO (SMOKE) ---
+const smokeFrames = [];
+for (let i = 1; i <= 10; i++) {
+    const frameNum = i.toString().padStart(2, '0');
+    const tex = textureLoader.load(`/images/smoke/Smoke_Frame_${frameNum}.png`);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    smokeFrames.push(tex);
+}
+// -----------------------------------------------
+
 // ==========================================
 // 2. CONSTANTES E VARIÁVEIS GLOBAIS
 // ==========================================
 const WIDTH = 800;
 const HEIGHT = 600;
 const GRAVITY = 0.6;
+
+// --- SISTEMA DE CONTROLO DE FPS ---
+const TARGET_FPS = 60;
+const FRAME_DELAY = 1000 / TARGET_FPS;
+let lastFrameTime = 0;
+// ----------------------------------
 
 let gameState = "menu";      // "menu" | "playing" | "paused" | "game_over" | "win"
 let currentPhase = 1;
@@ -43,13 +60,14 @@ let enemies = [];
 let portals = [];
 let playerProjectiles = [];
 let droppedItems = [];
+let visualEffects = []; // <-- NOVA LISTA PARA EFEITOS VISUAIS (FUMO)
 
 let platformsData = [];
 let movingPlatforms = [];
 let rotatingObstacles = [];
 
 let isMusicEnabled = true;
-let isSfxEnabled = true;     // NOVO: controla efeitos sonoros
+let isSfxEnabled = true;
 
 let currentWave = 1;
 const MAX_WAVES = 3;
@@ -63,9 +81,70 @@ let totalEnemiesDefeated = 0;
 let buffDamageTimer = 0;
 let isDamageBuffActive = false;
 
+// --- SISTEMA DE DELAY DE ATAQUES (COOLDOWN) ---
+let lastBasicAttackTime = 0;
+const BASIC_ATTACK_COOLDOWN = 300; // 300ms (0.3 segundos) de espera
+
+let lastSpecialAttackTime = 0;
+const SPECIAL_ATTACK_COOLDOWN = 600; // 600ms (0.6 segundos) de espera
+// ----------------------------------------------
+
 // ==========================================
 // 3. CLASSES AUXILIARES INTERNAS
 // ==========================================
+
+// --- NOVA CLASSE: EFEITO DE FUMO ---
+class SmokeEffect {
+    constructor(scene, x, y) {
+        this.scene = scene;
+        this.active = true;
+        
+        this.currentFrame = 0;
+        this.frameTimer = 0;
+        this.frameSpeed = 3; // Velocidade da animação (menor = mais rápido)
+
+        const geo = new THREE.PlaneGeometry(80, 80); // Tamanho da fumaça
+        this.material = new THREE.MeshBasicMaterial({
+            map: smokeFrames[0],
+            transparent: true,
+            alphaTest: 0.1,
+            side: THREE.DoubleSide
+        });
+
+        this.mesh = new THREE.Mesh(geo, this.material);
+        this.mesh.position.set(x, y + 10, 6); // Z:6 para ficar à frente dos items e inimigos
+        
+        // Rotação ou flip aleatório para a fumaça parecer diferente a cada vez
+        if (Math.random() > 0.5) this.mesh.scale.x = -1;
+
+        this.scene.add(this.mesh);
+    }
+
+    update() {
+        this.frameTimer++;
+        if (this.frameTimer >= this.frameSpeed) {
+            this.frameTimer = 0;
+            this.currentFrame++;
+            
+            if (this.currentFrame >= smokeFrames.length) {
+                // A animação terminou
+                this.active = false;
+            } else {
+                // Atualiza a textura para o próximo frame
+                this.material.map = smokeFrames[this.currentFrame];
+                this.material.needsUpdate = true;
+            }
+        }
+    }
+
+    destroy() {
+        this.scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.material.dispose();
+    }
+}
+// -----------------------------------
+
 class DroppedItem {
     constructor(scene, x, y, type) {
         this.type = type;
@@ -146,7 +225,6 @@ class Portal {
     update(enemiesArray) {
         if (!this.active) return;
 
-        // animação do sprite sheet
         this.frameTimer++;
         if (this.frameTimer >= this.animationSpeed) {
             this.frameTimer = 0;
@@ -154,7 +232,6 @@ class Portal {
             this.texture.offset.x = this.currentFrame / this.totalFrames;
         }
 
-        // spawn de inimigos
         this.spawnTimer--;
         if (this.spawnTimer <= 0) {
             const maxGlobalEnemies = this.waveNumber * 2;
@@ -284,7 +361,6 @@ btnOptions?.addEventListener('click', () => {
     menuOptions.classList.toggle('hidden');
 });
 
-// Sincroniza flags de áudio com checkboxes do menu
 if (optMusic) optMusic.checked = isMusicEnabled;
 if (optSfx) optSfx.checked = isSfxEnabled;
 
@@ -303,20 +379,17 @@ optSfx?.addEventListener('change', () => {
     if (pauseSfxToggle) pauseSfxToggle.checked = isSfxEnabled;
 });
 
-// Botão EXIT do menu inicial
 btnExit?.addEventListener('click', () => {
-    // Browsers modernos só permitem fechar janelas abertas via window.open(). [web:13][web:16][web:19]
     window.close();
     alert('Para sair do jogo, feche esta aba ou janela do navegador.');
 });
 
-// ======= PAUSE: sincroniza toggles =======
+// ======= PAUSE =======
 function syncPauseToggles() {
     if (pauseMusicToggle) pauseMusicToggle.checked = isMusicEnabled;
     if (pauseSfxToggle) pauseSfxToggle.checked = isSfxEnabled;
 }
 
-// Botões do PAUSE
 btnResume?.addEventListener('click', () => {
     gameState = "playing";
     uiPaused.classList.remove('active');
@@ -324,7 +397,6 @@ btnResume?.addEventListener('click', () => {
 });
 
 btnPauseMenu?.addEventListener('click', () => {
-    // Volta para o menu principal
     gameState = "menu";
     sounds.bgm.pause();
     hideAllScreens();
@@ -336,7 +408,6 @@ btnPauseExit?.addEventListener('click', () => {
     alert('Para sair do jogo, feche esta aba ou janela do navegador.');
 });
 
-// Alterações de áudio na tela de PAUSE
 pauseMusicToggle?.addEventListener('change', () => {
     isMusicEnabled = pauseMusicToggle.checked;
     if (!isMusicEnabled) {
@@ -353,7 +424,7 @@ pauseSfxToggle?.addEventListener('change', () => {
 });
 
 // ==========================================
-// 7. MONITORAMENTO DO TECLADO (Z, X, C, ESC, ENTER)
+// 7. MONITORAMENTO DO TECLADO (W/A/S/D, J/K, ESC, ENTER)
 // ==========================================
 const keys = {};
 
@@ -361,7 +432,10 @@ window.addEventListener('keydown', (e) => {
     const key = e.key.toLowerCase();
     keys[key] = true;
 
-    // ESC: pause / resume
+    if (key === 'w') {
+        keys['z'] = true;
+    }
+
     if (key === 'escape') {
         if (gameState === "playing") {
             gameState = "paused";
@@ -375,49 +449,71 @@ window.addEventListener('keydown', (e) => {
         }
     }
 
-    // ENTER: sair de telas finais
     if (key === 'enter') {
-        if (gameState === "game_over" || gameState === "win") {
+        if (gameState === "game_over") {
+            hideAllScreens();
+            uiHud.classList.add('active');
+            gameState = "playing";
+            resetGame();
+            if (isMusicEnabled) safePlay(sounds.bgm);
+        } 
+        else if (gameState === "win") {
             hideAllScreens();
             uiHud.classList.remove('active');
             uiMenu?.classList.add('active');
             gameState = "menu";
         }
+        else if (gameState === "playing" && waveTransitionTimer > 0) {
+            waveTransitionTimer = 600; 
+        }
     }
 
     if (gameState === "playing" && player) {
-        // [X] - ATAQUE BÁSICO (Sem custo)
-        if (key === 'x') {
-            const direction = player.flipX ? -1 : 1;
-            playerProjectiles.push(new Projectile(
-                scene,
-                player.sprite.position.x,
-                player.sprite.position.y,
-                direction
-            ));
-            safePlayEffect(sounds.shoot);
-        }
+        const now = performance.now(); // Captura o tempo exato do clique
 
-        // [C] - ATAQUE ESPECIAL / BOLA DE FOGO (40 Mana)
-        if (key === 'c') {
-            const MANA_COST = 40;
-            if (player.mana >= MANA_COST) {
-                player.mana -= MANA_COST;
+        // [J] - ATAQUE BÁSICO (Verifica o Cooldown)
+        if (key === 'j') {
+            if (now - lastBasicAttackTime >= BASIC_ATTACK_COOLDOWN) {
                 const direction = player.flipX ? -1 : 1;
-                playerProjectiles.push(new Fireball(
+                playerProjectiles.push(new Projectile(
                     scene,
                     player.sprite.position.x,
                     player.sprite.position.y,
                     direction
                 ));
                 safePlayEffect(sounds.shoot);
+                lastBasicAttackTime = now; // Atualiza o relógio do último ataque
+            }
+        }
+
+        // [K] - ATAQUE ESPECIAL / BOLA DE FOGO (Verifica Mana e Cooldown)
+        if (key === 'k') {
+            if (now - lastSpecialAttackTime >= SPECIAL_ATTACK_COOLDOWN) {
+                const MANA_COST = 40;
+                if (player.mana >= MANA_COST) {
+                    player.mana -= MANA_COST;
+                    const direction = player.flipX ? -1 : 1;
+                    playerProjectiles.push(new Fireball(
+                        scene,
+                        player.sprite.position.x,
+                        player.sprite.position.y,
+                        direction
+                    ));
+                    safePlayEffect(sounds.shoot);
+                    lastSpecialAttackTime = now; // Atualiza o relógio do último ataque especial
+                }
             }
         }
     }
 });
 
 window.addEventListener('keyup', (e) => {
-    keys[e.key.toLowerCase()] = false;
+    const key = e.key.toLowerCase();
+    keys[key] = false;
+    
+    if (key === 'w') {
+        keys['z'] = false;
+    }
 });
 
 // ==========================================
@@ -469,7 +565,7 @@ function checkWaveProgress(levelData) {
             endPhaseWithVictory();
         } else {
             waveTransitionTimer++;
-            if (waveTransitionTimer >= 120) {
+            if (waveTransitionTimer >= 600) {
                 waveTransitionTimer = 0;
                 currentWave++;
                 spawnWave(currentWave, levelData);
@@ -539,14 +635,14 @@ function endPhaseWithVictory() {
 
     uiWin.classList.add('active');
     uiWin.innerHTML = `
-        <div style="text-align: center; color: white; font-family: sans-serif; padding: 20px;">
-            <h1 style="color: #f1c40f; font-size: 42px; text-shadow: 2px 2px #000;">ARENA CONCLUÍDA!</h1>
-            <div style="font-size: 90px; font-weight: bold; color: #2ecc71; margin: 20px 0; text-shadow: 4px 4px #000;">${finalRank}</div>
-            <p style="font-size: 18px;">Tempo de Combate: <span style="color:#f1c40f">${totalTime}s</span></p>
-            <p style="font-size: 18px;">Dano Sofrido: <span style="color:#e74c3c">${totalDamageTaken} HP</span></p>
-            <p style="font-size: 18px;">Inimigos Destruídos: <span style="color:#3498db">${totalEnemiesDefeated}</span></p>
+        <div id="win-panel" class="ui-panel center-panel">
+            <h1 class="ui-title">ARENA CONCLUÍDA!</h1>
+            <div class="rank-display">${finalRank}</div>
+            <p class="ui-text">Tempo de Combate: <span class="ui-highlight">${totalTime}s</span></p>
+            <p class="ui-text">Dano Sofrido: <span class="ui-highlight-danger">${totalDamageTaken} HP</span></p>
+            <p class="ui-text">Inimigos Destruídos: <span class="ui-highlight-info">${totalEnemiesDefeated}</span></p>
             <br>
-            <p style="font-size: 14px; color: #aaa;">Pressione [ENTER] para voltar</p>
+            <p class="ui-subtext">Pressione [ENTER] para voltar</p>
         </div>
     `;
 }
@@ -563,10 +659,15 @@ function resetGame() {
     playerProjectiles = [];
     droppedItems.forEach(i => i.destroy(scene));
     droppedItems = [];
+    visualEffects.forEach(v => v.destroy()); // Limpa a fumaça antiga ao reiniciar
+    visualEffects = [];
 
     platformsData.forEach(p => scene.remove(p));
     movingPlatforms.forEach(p => scene.remove(p.mesh));
     rotatingObstacles.forEach(o => scene.remove(o.mesh));
+
+    lastBasicAttackTime = 0;
+    lastSpecialAttackTime = 0;
 
     currentWave = 1;
     waveTransitionTimer = 0;
@@ -609,30 +710,40 @@ function updateHUD() {
             ? "PREPARANDO..."
             : `ONDA: ${currentWave}/${MAX_WAVES} &nbsp;|&nbsp; PORTAIS ATIVOS: ${portals.length}`;
 
+        let transitionOverlay = "";
+        if (waveTransitionTimer > 0) {
+            let secondsLeft = Math.ceil((600 - waveTransitionTimer) / 60);
+            transitionOverlay = `
+                <div id="wave-transition-overlay" class="ui-panel center-panel">
+                    <h2 class="ui-title">ONDA ${currentWave} CONCLUÍDA!</h2>
+                    <p class="ui-text">Próxima onda em: <span class="ui-highlight">${secondsLeft}s</span></p>
+                    <p class="ui-subtext">Pressione <b>[ENTER]</b> para pular a espera</p>
+                </div>
+            `;
+        }
+
         hudHealth.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <div>
-                    <div style="margin-bottom: 8px;">
-                        <div style="width: 200px; height: 18px; background: #222; border: 2px solid #fff; border-radius: 4px; overflow: hidden; box-shadow: 2px 2px 0px #000;">
-                            <div style="width: ${hpPercent}%; height: 100%; background: ${hpBarColor}; transition: width 0.2s ease-out; background-color: ${hpBarColor};"></div>
-                        </div>
+            <div id="hud-stats-container">
+                <div class="bars-wrapper">
+                    <div class="bar-bg">
+                        <div class="bar-fill health-fill" style="width: ${hpPercent}%; background-color: ${hpBarColor};"></div>
                     </div>
-                    <div>
-                        <div style="width: 160px; height: 12px; background: #222; border: 2px solid #fff; border-radius: 4px; overflow: hidden; box-shadow: 2px 2px 0px #000;">
-                            <div style="width: ${manaPercent}%; height: 100%; background: #3498db;"></div>
-                        </div>
+                    <div class="bar-bg">
+                        <div class="bar-fill mana-fill" style="width: ${manaPercent}%;"></div>
                     </div>
                 </div>
-                <div style="color: #fff; font-size: 16px; font-weight: bold; text-shadow: 2px 2px #000; margin-left: 10px;">
-                    ${waveText} <br> <span style="color:#f1c40f">${isDamageBuffActive ? '🔥 BUFF ATIVO!' : ''}</span>
+                <div class="wave-info-text">
+                    ${waveText} <br> <span class="buff-alert">${isDamageBuffActive ? '🔥 BUFF ATIVO!' : ''}</span>
                 </div>
             </div>
 
-            <div style="position: fixed; top: 20px; right: 20px; text-align: right; color: white; font-family: sans-serif; font-size: 16px; text-shadow: 2px 2px 0 #000; z-index: 1000;">
-                <span style="color: #2ecc71; font-weight: bold;">Z</span> : Pulo<br>
-                <span style="color: #e74c3c; font-weight: bold;">X</span> : Ataque Básico<br>
-                <span style="color: #3498db; font-weight: bold;">C</span> : Bola de Fogo <span style="color: #aaa; font-size: 14px;">(40 Mana)</span>
+            <div id="hud-controls" class="ui-panel right-panel">
+                <div class="control-line"><span class="key-highlight">W A S D</span> : Mover / Pular</div>
+                <div class="control-line"><span class="key-highlight">J</span> : Ataque Básico</div>
+                <div class="control-line"><span class="key-highlight">K</span> : Bola de Fogo <span class="mana-cost">(40 Mana)</span></div>
             </div>
+
+            ${transitionOverlay}
         `;
     }
 
@@ -642,8 +753,15 @@ function updateHUD() {
 // ==========================================
 // 11. LOOP DE EXECUÇÃO CONSTANTE (ANIMATE)
 // ==========================================
-function animate() {
+function animate(currentTime) {
     requestAnimationFrame(animate);
+
+    if (!currentTime) currentTime = performance.now();
+    const elapsed = currentTime - lastFrameTime;
+
+    if (elapsed < FRAME_DELAY) return;
+
+    lastFrameTime = currentTime - (elapsed % FRAME_DELAY);
 
     if (gameState === "playing" && player) {
         if (currentLevelDataCache) {
@@ -657,7 +775,6 @@ function animate() {
 
         portals.forEach(p => p.update(enemies));
 
-        // plataformas móveis
         movingPlatforms.forEach(p => {
             const delta = p.speed * p.direction;
             p.mesh.position.x += delta;
@@ -667,13 +784,10 @@ function animate() {
             }
         });
 
-        // obstáculos giratórios
         rotatingObstacles.forEach(o => { o.mesh.rotation.z += o.speed; });
 
-        // colisores ativos
         const activeColliders = [...platformsData, ...movingPlatforms.map(p => p.mesh)];
 
-        // update jogador
         const prevHealth = player.health;
         player.update(keys, activeColliders, GRAVITY, sounds);
         if (player.health < prevHealth) totalDamageTaken += (prevHealth - player.health);
@@ -684,26 +798,23 @@ function animate() {
 
         updateCamera(camera, player, WIDTH);
 
-        // inimigos
         for (let i = enemies.length - 1; i >= 0; i--) {
             let e = enemies[i];
             e.update(player.sprite.position, activeColliders, GRAVITY);
 
-            if (player.sprite.position.distanceTo(e.sprite.position) < 55) {
+            if (player.sprite.position.distanceTo(e.sprite.position) < 30) {
                 const hpBefore = player.health;
                 player.takeDamage(1, sounds, e.sprite.position.x);
                 if (player.health < hpBefore) totalDamageTaken += (hpBefore - player.health);
             }
         }
 
-        // projéteis do jogador
         for (let i = playerProjectiles.length - 1; i >= 0; i--) {
             let p = playerProjectiles[i];
             p.update();
 
             let hit = false;
 
-            // colisão com portais
             for (let k = portals.length - 1; k >= 0; k--) {
                 let portal = portals[k];
                 if (p.mesh.position.distanceTo(portal.mesh.position) < 40) {
@@ -722,17 +833,18 @@ function animate() {
                     }
 
                     if (!portal.active) {
+                        // O portal também explode em fumaça!
+                        visualEffects.push(new SmokeEffect(scene, portal.mesh.position.x, portal.mesh.position.y));
                         portals.splice(k, 1);
                     }
                     if (hit) break;
                 }
             }
 
-            // colisão com inimigos
             if (!hit) {
                 for (let j = enemies.length - 1; j >= 0; j--) {
                     let e = enemies[j];
-                    if (p.mesh.position.distanceTo(e.sprite.position) < 65) {
+                    if (p.mesh.position.distanceTo(e.sprite.position) < 40) {
 
                         if (p.isPiercing && p.hitTargets && p.hitTargets.has(e)) continue;
 
@@ -749,6 +861,10 @@ function animate() {
 
                         if (e.health <= 0) {
                             handleEnemyDefeatDrop(e.sprite.position.x, e.sprite.position.y);
+                            
+                            // AQUI: ADICIONAMOS A ANIMAÇÃO DE FUMO NO LUGAR ONDE O INIMIGO MORREU!
+                            visualEffects.push(new SmokeEffect(scene, e.sprite.position.x, e.sprite.position.y));
+                            
                             e.destroy();
                             enemies.splice(j, 1);
                         }
@@ -763,7 +879,17 @@ function animate() {
             }
         }
 
-        // itens dropados
+        // --- ATUALIZAÇÃO DOS EFEITOS DE FUMO ---
+        for (let i = visualEffects.length - 1; i >= 0; i--) {
+            let effect = visualEffects[i];
+            effect.update();
+            if (!effect.active) {
+                effect.destroy();
+                visualEffects.splice(i, 1);
+            }
+        }
+        // ---------------------------------------
+
         for (let i = droppedItems.length - 1; i >= 0; i--) {
             let item = droppedItems[i];
             item.update();
@@ -787,7 +913,6 @@ function animate() {
             }
         }
 
-        // morte / queda
         if (player.health <= 0 || player.sprite.position.y < -400) {
             gameState = "game_over";
             uiGameOver.classList.add('active');
@@ -800,4 +925,5 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-animate();
+// Inicia o Loop
+requestAnimationFrame(animate);

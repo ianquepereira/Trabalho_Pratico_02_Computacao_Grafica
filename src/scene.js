@@ -91,7 +91,14 @@ function buildVisualPlatform(width, height, isFloating = false, spawnTrees = tru
                 const isEdge = (col === 0 || col === cols - 1);
                 const randomVal = Math.random();
                 
-                if (spawnTrees && !isEdge && col < cols - 2 && randomVal < 0.10) {
+                // Variável para sabermos a posição X exata
+                const posX = startX + col * TILE_SIZE;
+                
+                // NOVO: Verifica se a posição está longe das extremidades para não tapar o portal
+                const isNearPortal = Math.abs(posX) > 420;
+                
+                // Chance de árvore aumentada para 25% (!isNearPortal impede que nasçam em cima dos portais)
+                if (spawnTrees && !isEdge && col < cols - 2 && !isNearPortal && randomVal < 0.25) {
                     const treeNum = Math.floor(Math.random() * 18) + 1; 
                     let tWidth = 80; let tHeight = 128; let yOffset = -16; 
                     
@@ -101,22 +108,23 @@ function buildVisualPlatform(width, height, isFloating = false, spawnTrees = tru
 
                     const treeMesh = new THREE.Mesh(new THREE.PlaneGeometry(tWidth, tHeight), treeMaterials[`Tree_${treeNum}`]);
                     const treeY = (startY - row * TILE_SIZE) + (TILE_SIZE / 2) + (tHeight / 2) + yOffset;
-                    treeMesh.position.set(startX + col * TILE_SIZE + (TILE_SIZE / 2), treeY, -0.1);
+                    treeMesh.position.set(posX + (TILE_SIZE / 2), treeY, -0.1);
                     group.add(treeMesh);
                 } 
-                else if (!isEdge && randomVal >= 0.10 && randomVal < 0.25) {
+                else if (!isEdge && randomVal >= 0.25 && randomVal < 0.40) {
                     const stoneNum = Math.floor(Math.random() * 6) + 1; 
                     const rockWidth = TILE_SIZE * 0.8; const rockHeight = TILE_SIZE * 0.5; 
                     const stoneMesh = new THREE.Mesh(new THREE.PlaneGeometry(rockWidth, rockHeight), stoneMaterials[`Stone_${stoneNum}`]);
                     const rockY = (startY - row * TILE_SIZE) + (TILE_SIZE / 2) + (rockHeight / 2) - 2;
-                    stoneMesh.position.set(startX + col * TILE_SIZE, rockY, 0.05);
+                    stoneMesh.position.set(posX, rockY, 0.05);
                     group.add(stoneMesh); skipDecals = 1; 
                 } 
-                else if (randomVal > 0.65) {
+                else if (randomVal > 0.60) {
+                    // Mantém os matinhos do Tile original
                     const grassOptions = ['Tile_06', 'Tile_07', 'Tile_08', 'Tile_35'];
                     const randomGrass = grassOptions[Math.floor(Math.random() * grassOptions.length)];
                     const grassMesh = new THREE.Mesh(tileGeometry, tileMaterials[randomGrass]);
-                    grassMesh.position.set(startX + col * TILE_SIZE, startY - row * TILE_SIZE + TILE_SIZE, 0.1);
+                    grassMesh.position.set(posX, startY - row * TILE_SIZE + TILE_SIZE, 0.1);
                     group.add(grassMesh);
                 }
             }
@@ -154,13 +162,9 @@ export const LEVEL_MAPS = {
             { x: -700, y: 0, width: 40, height: 1200, isWall: true }, 
             { x: 700, y: 0, width: 40, height: 1200, isWall: true },
 
-            // NÍVEL 1: O CHÃO DA ARENA
-            { x: 0, y: -250, width: 1400, height: 128, isFloating: false, noTrees: true }, 
-
-            // NÍVEL 2: PRIMEIRA PLATAFORMA CONTINUA
-            { x: 0, y: -40, width: 1400, height: 32, isFloating: true, oneWay: true, noTrees: true },
-
-            // NÍVEL 3: SEGUNDA PLATAFORMA CONTINUA (ALTURA AMPLADA)
+            // NOVO: noTrees mudou para "false" em todos os andares para nascerem árvores!
+            { x: 0, y: -250, width: 1400, height: 128, isFloating: false, noTrees: false }, 
+            { x: 0, y: -40, width: 1400, height: 32, isFloating: true, oneWay: true, noTrees: false },
             { x: 0, y: 122, width: 1400, height: 32, isFloating: true, oneWay: true, noTrees: false }
         ],
         movingPlatforms: [],
@@ -168,15 +172,14 @@ export const LEVEL_MAPS = {
         
         // DISTRIBUIÇÃO INICIAL DE SPAWN NOS 3 NÍVEIS
         enemiesSpawn: [
-            { x: -450, y: -170, patrol: [-650, -250] },   // Nível 1 - Esq
-            { x: 450, y: -170, patrol: [250, 650] },      // Nível 1 - Dir
-            { x: -350, y: -10, patrol: [-550, -150] },    // Nível 2 - Esq
-            { x: 350, y: -10, patrol: [150, 550] },       // Nível 2 - Dir
-            { x: -500, y: 155, patrol: [-650, -350] },    // Nível 3 - Esq (Adicionado!)
-            { x: 500, y: 155, patrol: [350, 650] }        // Nível 3 - Dir (Adicionado!)
+            { x: -450, y: -170, patrol: [-650, -250] },   
+            { x: 450, y: -170, patrol: [250, 650] },      
+            { x: -350, y: -10, patrol: [-550, -150] },    
+            { x: 350, y: -10, patrol: [150, 550] },       
+            { x: -500, y: 155, patrol: [-650, -350] },    
+            { x: 500, y: 155, patrol: [350, 650] }        
         ],
         
-        // O Boss nasce no centro do Nível 3
         guardianSpawn: { x: 0, y: 155, patrol: [-200, 200] },
         
         gatePos: null,
@@ -204,6 +207,7 @@ export function buildLevel(scene, phaseNum) {
 
         if (!data.isWall) {
             const isFloating = data.isFloating === true;
+            // Lê o "noTrees: false" que colocámos lá em cima
             const spawnTrees = data.noTrees !== true; 
             
             const { group: visualGroup, actualHeight } = buildVisualPlatform(data.width, data.height, isFloating, spawnTrees);

@@ -3,23 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Forest Adventure - Game Jam</title>
+    <title>Forest Adventure</title>
 
     <style>
+        /* =========================================
+           1. RESET & BASE
+           ========================================= */
         html, body {
             width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #000;
-            font-family: 'Courier New', Courier, monospace;
+            background: #0d0d0d;
+            /* Fonte moderna e limpa para um visual minimalista */
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             color: white;
+            user-select: none;
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         canvas {
             display: block;
@@ -30,6 +33,7 @@
             z-index: 1;
         }
 
+        /* Camada que segura toda a Interface */
         #ui-layer {
             position: absolute;
             inset: 0;
@@ -37,6 +41,7 @@
             pointer-events: none;
         }
 
+        /* Telas de Fundo (Blur suave atrás dos painéis) */
         .screen {
             display: none;
             width: 100%;
@@ -44,188 +49,266 @@
             justify-content: center;
             align-items: center;
             pointer-events: auto;
-            background:
-                radial-gradient(circle at center, rgba(0, 0, 0, 0.30), rgba(0, 0, 0, 0.80)),
-                rgba(0, 0, 0, 0.25);
-            backdrop-filter: blur(3px);
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(6px); /* Efeito vidro fosco */
+            -webkit-backdrop-filter: blur(6px);
         }
 
-        .screen.active {
-            display: flex;
-        }
+        .screen.active { display: flex; }
 
-        .panel {
-            width: min(560px, 86vw);
-            padding: 22px 24px 18px;
-            background: linear-gradient(180deg, rgba(18, 18, 18, 0.98), rgba(10, 10, 10, 0.98));
-            border: 2px solid #d9d9d9;
-            box-shadow:
-                0 0 0 3px rgba(0, 0, 0, 0.90),
-                0 14px 40px rgba(0, 0, 0, 0.65);
+        /* =========================================
+           2. PAINÉIS MINIMALISTAS (Menu, Pause, Vitória)
+           ========================================= */
+        .panel, .ui-panel {
+            background: rgba(20, 20, 22, 0.75); /* Fundo quase preto transparente */
+            border: 1px solid rgba(255, 255, 255, 0.1); /* Borda muito fina e subtil */
+            border-radius: 12px; /* Cantos suavemente arredondados */
+            padding: 32px 40px;
             text-align: center;
-            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
         }
 
-        .panel::before {
-            content: "";
-            position: absolute;
-            inset: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            pointer-events: none;
+        .menu-panel, .pause-panel {
+            width: min(420px, 90vw);
         }
 
-        .menu-panel,
-        .pause-panel {
-            max-width: 560px;
-        }
-
-        h1 {
-            font-size: clamp(2.6rem, 5vw, 4.4rem);
-            color: #43c95e;
-            text-shadow:
-                0 2px 0 #0d2a12,
-                0 4px 0 #07170a,
-                0 0 18px rgba(67, 201, 94, 0.22);
-            letter-spacing: 1px;
-            margin: 4px 0 10px;
-            line-height: 0.95;
+        /* Títulos limpos e elegantes */
+        h1, .ui-title {
+            font-size: 2.5rem;
+            color: #f1c40f;
+            margin: 0 0 8px 0;
+            font-weight: 800;
+            letter-spacing: -0.5px;
         }
 
         .game-subtitle {
-            margin: 0 0 16px;
-            font-size: 0.98rem;
-            color: #d7d7d7;
-            opacity: 0.95;
+            font-size: 1rem;
+            color: #aaa;
+            margin: 0 0 24px 0;
+            font-weight: 400;
         }
 
         h2 {
-            margin: 0 0 10px;
             font-size: 1.5rem;
-            color: #ffffff;
+            color: #fff;
+            margin: 0 0 16px 0;
+            font-weight: 600;
         }
 
-        p {
-            font-size: 0.98rem;
-            margin: 0 0 12px;
-            color: #e6e6e6;
-        }
-
-        button {
-            width: min(320px, 100%);
-            display: block;
-            margin: 10px auto;
-            padding: 12px 16px;
+        p, .ui-text {
             font-size: 1rem;
-            line-height: 1.1;
-            background: linear-gradient(180deg, #2e2e2e, #1f1f1f);
-            color: #f4f4f4;
-            border: 2px solid #4caf50;
-            font-family: 'Courier New', Courier, monospace;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
+            color: #ddd;
+            margin: 0 0 12px 0;
+        }
+
+        .ui-subtext {
+            font-size: 0.85rem;
+            color: #777;
+            margin-top: 20px;
+        }
+
+        /* Cores de Destaque */
+        .ui-highlight { color: #f1c40f; font-weight: bold; }
+        .ui-highlight-danger { color: #e74c3c; font-weight: bold; }
+        .ui-highlight-info { color: #3498db; font-weight: bold; }
+        .success-text { color: #2ecc71; }
+        .danger-text { color: #e74c3c; }
+
+        .rank-display {
+            font-size: 5rem;
+            font-weight: 900;
+            color: #2ecc71;
+            margin: 10px 0;
+            text-shadow: 0 0 30px rgba(46, 204, 113, 0.3);
+        }
+
+        /* =========================================
+           3. BOTÕES FLAT E MODERNOS
+           ========================================= */
+        button {
+            width: 100%;
+            display: block;
+            margin: 10px 0;
+            padding: 14px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.1);
             cursor: pointer;
-            box-shadow: 0 3px 0 rgba(0, 0, 0, 0.8);
-            transition: transform 0.08s ease, filter 0.15s ease, background 0.15s ease;
+            transition: all 0.2s ease;
         }
 
         button:hover {
-            filter: brightness(1.15);
-            transform: translateY(-1px);
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.3);
         }
 
         button:active {
-            transform: translateY(2px);
-            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.8);
+            transform: translateY(0);
         }
 
-        .btn.primary { border-color: #41d36b; }
-        .btn.secondary { border-color: #3ea7ff; }
-        .btn.danger { border-color: #ff5c5c; }
+        /* Cores nos Hover dos botões */
+        .btn.primary:hover { background: #2ecc71; color: #000; border-color: #2ecc71; }
+        .btn.danger:hover { background: #e74c3c; color: #000; border-color: #e74c3c; }
 
-        #menu-options,
-        .pause-options {
-            margin-top: 12px;
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+        /* =========================================
+           4. TOGGLES (Interruptores Minimalistas)
+           ========================================= */
+        #menu-options, .pause-options {
+            margin-top: 16px;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
             text-align: left;
         }
 
-        #menu-options.hidden {
-            display: none;
-        }
+        #menu-options.hidden { display: none; }
 
         .toggle {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
-            margin: 8px 0;
+            margin: 12px 0;
             font-size: 0.95rem;
-            color: #f0f0f0;
+            color: #ccc;
+            cursor: pointer;
         }
 
+        /* Estilo iOS toggle */
         .toggle input {
+            appearance: none;
+            width: 40px;
+            height: 22px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 11px;
+            position: relative;
+            outline: none;
+            cursor: pointer;
+            transition: 0.3s ease;
+        }
+
+        .toggle input::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
             width: 18px;
             height: 18px;
-            accent-color: #43c95e;
+            background: #fff;
+            border-radius: 50%;
+            transition: 0.3s ease;
         }
 
-        #controls-hint {
-            margin-top: 14px;
-            font-size: 0.85rem;
-            color: #cfcfcf;
-            opacity: 0.85;
-            line-height: 1.5;
-        }
+        .toggle input:checked { background: #2ecc71; }
+        .toggle input:checked::after { transform: translateX(18px); }
 
+        /* =========================================
+           5. HUD DE JOGO (Vida, Mana e Controlos)
+           ========================================= */
         #hud {
             display: none;
             position: absolute;
-            top: 18px;
-            left: 18px;
-            z-index: 20;
+            inset: 0; /* Preenche a tela toda sem bloquear cliques */
             pointer-events: none;
         }
 
-        #hud.active {
-            display: block;
+        #hud.active { display: block; }
+
+        /* Container de Stats (Topo Esquerda) */
+        #hud-stats-container {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
 
-        .hud-text {
-            font-size: 1.15rem;
-            font-weight: 700;
-            margin: 4px 0;
+        .bars-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* Fundo das barras */
+        .bar-bg {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+            overflow: hidden;
+            width: 200px;
+        }
+        
+        .bar-bg:nth-child(2) { width: 160px; } /* Barra de mana menor */
+
+        .bar-fill {
+            height: 100%;
+            transition: width 0.2s ease-out, background-color 0.2s;
+        }
+
+        .health-fill { height: 16px; }
+        .mana-fill { height: 8px; background-color: #3498db; }
+
+        .wave-info-text {
             color: #fff;
-            text-shadow: 2px 2px 0 #000;
+            font-size: 1rem;
+            font-weight: 600;
+            line-height: 1.4;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
         }
 
-        .pause-buttons button {
-            width: min(280px, 100%);
-            margin-top: 8px;
+        .buff-alert { color: #f1c40f; }
+
+        /* Painel de Controlos (Topo Direita) */
+        .right-panel {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            padding: 16px 20px;
+            text-align: left;
         }
 
-        .pause-hint {
-            margin: 10px 0 0;
-            color: #bdbdbd;
-            font-size: 0.88rem;
+        .control-line {
+            margin: 6px 0;
+            font-size: 0.9rem;
+            color: #bbb;
         }
 
-        @media (max-width: 700px) {
-            .panel {
-                width: min(92vw, 560px);
-                padding: 18px 16px 14px;
-            }
+        .key-highlight {
+            color: #fff;
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-weight: bold;
+            display: inline-block;
+            min-width: 24px;
+            text-align: center;
+        }
 
-            button {
-                width: 100%;
-                font-size: 0.95rem;
-                padding: 12px 14px;
-            }
+        .mana-cost { color: #555; font-size: 0.8rem; }
 
-            h1 {
-                font-size: clamp(2.2rem, 10vw, 3.5rem);
-            }
+        /* Fase Atual (Fundo Esquerda) */
+        #hud-phase {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.3);
+            letter-spacing: 2px;
+        }
+
+        /* Overlay Central de Transição */
+        .center-panel {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-color: rgba(241, 196, 15, 0.3);
         }
     </style>
 
@@ -245,26 +328,21 @@
         <div id="menu-screen" class="screen active">
             <div class="panel menu-panel">
                 <h1>Forest Adventure</h1>
-                <p class="game-subtitle">Derrote as ondas, destrua os portais e salve a floresta!</p>
+                <p class="game-subtitle">Derrote as ondas, destrua os portais e salve a floresta.</p>
 
                 <button id="btn-start" class="btn primary">Iniciar Jogo</button>
-                <button id="btn-options" class="btn secondary">Opções</button>
+                <button id="btn-options" class="btn secondary">Configurações</button>
                 <button id="btn-exit" class="btn danger">Sair do Jogo</button>
 
                 <div id="menu-options" class="hidden">
-                    <h2>Configurações</h2>
                     <label class="toggle">
+                        <span>Música de Fundo</span>
                         <input type="checkbox" id="opt-music" checked>
-                        <span>Música</span>
                     </label>
                     <label class="toggle">
-                        <input type="checkbox" id="opt-sfx" checked>
                         <span>Efeitos Sonoros</span>
+                        <input type="checkbox" id="opt-sfx" checked>
                     </label>
-                </div>
-
-                <div id="controls-hint">
-                    Controles: A / D (Mover) | Z (Pulo) | X (Ataque Básico) | C (Bola de Fogo)
                 </div>
             </div>
         </div>
@@ -275,50 +353,46 @@
 
                 <div class="pause-options">
                     <label class="toggle">
+                        <span>Música de Fundo</span>
                         <input type="checkbox" id="pause-music-toggle" checked>
-                        <span>Música</span>
                     </label>
                     <label class="toggle">
-                        <input type="checkbox" id="pause-sfx-toggle" checked>
                         <span>Efeitos Sonoros</span>
+                        <input type="checkbox" id="pause-sfx-toggle" checked>
                     </label>
                 </div>
 
-                <div class="pause-buttons">
-                    <button id="btn-resume" class="btn primary">Retomar</button>
+                <div style="margin-top: 24px;">
+                    <button id="btn-resume" class="btn primary">Retomar Partida</button>
                     <button id="btn-pause-menu" class="btn secondary">Voltar ao Menu</button>
                     <button id="btn-pause-exit" class="btn danger">Sair do Jogo</button>
                 </div>
 
-                <p class="pause-hint">Pressione [ESC] para continuar</p>
+                <p class="ui-subtext">Pressione [ESC] para voltar à ação</p>
             </div>
         </div>
 
         <div id="phase-screen" class="screen">
             <div class="panel">
-                <h2 style="color: cyan;">FASE CONCLUÍDA!</h2>
-                <p>Pressione ENTER para a próxima fase</p>
+                <h2 class="success-text">Fase Concluída!</h2>
+                <p class="ui-subtext">Pressione [ENTER] para a próxima fase</p>
             </div>
         </div>
 
         <div id="gameover-screen" class="screen">
             <div class="panel">
-                <h2 style="color: red;">GAME OVER</h2>
-                <p>Pressione ENTER para voltar ao menu</p>
+                <h2 class="danger-text">GAME OVER</h2>
+                <p>A floresta foi dominada...</p>
+                <p class="ui-subtext">Pressione [ENTER] para tentar novamente</p>
             </div>
         </div>
 
         <div id="win-screen" class="screen">
-            <div class="panel">
-                <h2 style="color: gold;">VOCÊ VENCEU!</h2>
-                <p>A floresta está a salvo.</p>
-                <p>Pressione ENTER para voltar ao menu</p>
             </div>
-        </div>
 
         <div id="hud">
-            <div class="hud-text" id="hud-health">VIDA: 5</div>
-            <div class="hud-text" id="hud-phase">FASE: 1/3</div>
+            <div id="hud-health"></div>
+            <div id="hud-phase"></div>
         </div>
 
     </div>
