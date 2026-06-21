@@ -4,11 +4,10 @@ import { Enemy } from './characters/Enemy.js';
 import { Guardian } from './characters/Guardian.js';
 import { setupEnvironment, updateCamera, buildLevel } from './scene.js';
 
-// Importa as DUAS magias do novo ficheiro Projectile.js
 import { Projectile, Fireball } from './combat/Projectile.js';
 
 // ==========================================
-// 1. CARREGAMENTO DE TEXTURAS (DROPS, PORTAL E FUMO)
+// 1. CARREGAMENTO DE TEXTURAS
 // ==========================================
 const textureLoader = new THREE.TextureLoader();
 
@@ -27,7 +26,6 @@ Object.values(itemTextures).forEach(tex => {
 portalTextureBase.magFilter = THREE.NearestFilter;
 portalTextureBase.minFilter = THREE.NearestFilter;
 
-// --- CARREGAMENTO DOS FRAMES DE FUMO (SMOKE) ---
 const smokeFrames = [];
 for (let i = 1; i <= 10; i++) {
     const frameNum = i.toString().padStart(2, '0');
@@ -36,7 +34,6 @@ for (let i = 1; i <= 10; i++) {
     tex.minFilter = THREE.NearestFilter;
     smokeFrames.push(tex);
 }
-// -----------------------------------------------
 
 // ==========================================
 // 2. CONSTANTES E VARIÁVEIS GLOBAIS
@@ -45,13 +42,11 @@ const WIDTH = 800;
 const HEIGHT = 600;
 const GRAVITY = 0.6;
 
-// --- SISTEMA DE CONTROLO DE FPS ---
 const TARGET_FPS = 60;
 const FRAME_DELAY = 1000 / TARGET_FPS;
 let lastFrameTime = 0;
-// ----------------------------------
 
-let gameState = "menu";      // "menu" | "playing" | "paused" | "game_over" | "win"
+let gameState = "menu";      
 let currentPhase = 1;
 
 let player = null;
@@ -60,7 +55,7 @@ let enemies = [];
 let portals = [];
 let playerProjectiles = [];
 let droppedItems = [];
-let visualEffects = []; // <-- NOVA LISTA PARA EFEITOS VISUAIS (FUMO)
+let visualEffects = []; 
 
 let platformsData = [];
 let movingPlatforms = [];
@@ -81,19 +76,16 @@ let totalEnemiesDefeated = 0;
 let buffDamageTimer = 0;
 let isDamageBuffActive = false;
 
-// --- SISTEMA DE DELAY DE ATAQUES (COOLDOWN) ---
 let lastBasicAttackTime = 0;
-const BASIC_ATTACK_COOLDOWN = 300; // 300ms (0.3 segundos) de espera
+const BASIC_ATTACK_COOLDOWN = 300; 
 
 let lastSpecialAttackTime = 0;
-const SPECIAL_ATTACK_COOLDOWN = 600; // 600ms (0.6 segundos) de espera
-// ----------------------------------------------
+const SPECIAL_ATTACK_COOLDOWN = 600; 
 
 // ==========================================
 // 3. CLASSES AUXILIARES INTERNAS
 // ==========================================
 
-// --- NOVA CLASSE: EFEITO DE FUMO ---
 class SmokeEffect {
     constructor(scene, x, y) {
         this.scene = scene;
@@ -101,9 +93,9 @@ class SmokeEffect {
         
         this.currentFrame = 0;
         this.frameTimer = 0;
-        this.frameSpeed = 3; // Velocidade da animação (menor = mais rápido)
+        this.frameSpeed = 3; 
 
-        const geo = new THREE.PlaneGeometry(80, 80); // Tamanho da fumaça
+        const geo = new THREE.PlaneGeometry(80, 80); 
         this.material = new THREE.MeshBasicMaterial({
             map: smokeFrames[0],
             transparent: true,
@@ -112,9 +104,8 @@ class SmokeEffect {
         });
 
         this.mesh = new THREE.Mesh(geo, this.material);
-        this.mesh.position.set(x, y + 10, 6); // Z:6 para ficar à frente dos items e inimigos
+        this.mesh.position.set(x, y + 10, 6); 
         
-        // Rotação ou flip aleatório para a fumaça parecer diferente a cada vez
         if (Math.random() > 0.5) this.mesh.scale.x = -1;
 
         this.scene.add(this.mesh);
@@ -127,10 +118,8 @@ class SmokeEffect {
             this.currentFrame++;
             
             if (this.currentFrame >= smokeFrames.length) {
-                // A animação terminou
                 this.active = false;
             } else {
-                // Atualiza a textura para o próximo frame
                 this.material.map = smokeFrames[this.currentFrame];
                 this.material.needsUpdate = true;
             }
@@ -143,7 +132,6 @@ class SmokeEffect {
         this.material.dispose();
     }
 }
-// -----------------------------------
 
 class DroppedItem {
     constructor(scene, x, y, type) {
@@ -327,7 +315,6 @@ const uiWin = document.getElementById('win-screen');
 const hudHealth = document.getElementById('hud-health');
 const hudPhase = document.getElementById('hud-phase');
 
-// Botões e opções do MENU
 const btnStart = document.getElementById('btn-start');
 const btnOptions = document.getElementById('btn-options');
 const btnExit = document.getElementById('btn-exit');
@@ -335,7 +322,6 @@ const menuOptions = document.getElementById('menu-options');
 const optMusic = document.getElementById('opt-music');
 const optSfx = document.getElementById('opt-sfx');
 
-// Botões e toggles do PAUSE
 const btnResume = document.getElementById('btn-resume');
 const btnPauseMenu = document.getElementById('btn-pause-menu');
 const btnPauseExit = document.getElementById('btn-pause-exit');
@@ -346,7 +332,6 @@ function hideAllScreens() {
     [uiMenu, uiPaused, uiPhase, uiGameOver, uiWin].forEach(el => el?.classList.remove('active'));
 }
 
-// ======= MENU INICIAL =======
 btnStart?.addEventListener('click', () => {
     hideAllScreens();
     uiHud.classList.add('active');
@@ -384,7 +369,6 @@ btnExit?.addEventListener('click', () => {
     alert('Para sair do jogo, feche esta aba ou janela do navegador.');
 });
 
-// ======= PAUSE =======
 function syncPauseToggles() {
     if (pauseMusicToggle) pauseMusicToggle.checked = isMusicEnabled;
     if (pauseSfxToggle) pauseSfxToggle.checked = isSfxEnabled;
@@ -424,7 +408,7 @@ pauseSfxToggle?.addEventListener('change', () => {
 });
 
 // ==========================================
-// 7. MONITORAMENTO DO TECLADO (W/A/S/D, J/K, ESC, ENTER)
+// 7. MONITORAMENTO DO TECLADO (W/A/S/D, J/K/L, ESC, ENTER)
 // ==========================================
 const keys = {};
 
@@ -469,9 +453,9 @@ window.addEventListener('keydown', (e) => {
     }
 
     if (gameState === "playing" && player) {
-        const now = performance.now(); // Captura o tempo exato do clique
+        const now = performance.now();
 
-        // [J] - ATAQUE BÁSICO (Verifica o Cooldown)
+        // [J] - ATAQUE BÁSICO
         if (key === 'j') {
             if (now - lastBasicAttackTime >= BASIC_ATTACK_COOLDOWN) {
                 const direction = player.flipX ? -1 : 1;
@@ -482,11 +466,11 @@ window.addEventListener('keydown', (e) => {
                     direction
                 ));
                 safePlayEffect(sounds.shoot);
-                lastBasicAttackTime = now; // Atualiza o relógio do último ataque
+                lastBasicAttackTime = now;
             }
         }
 
-        // [K] - ATAQUE ESPECIAL / BOLA DE FOGO (Verifica Mana e Cooldown)
+        // [K] - BOLA DE FOGO
         if (key === 'k') {
             if (now - lastSpecialAttackTime >= SPECIAL_ATTACK_COOLDOWN) {
                 const MANA_COST = 40;
@@ -500,8 +484,19 @@ window.addEventListener('keydown', (e) => {
                         direction
                     ));
                     safePlayEffect(sounds.shoot);
-                    lastSpecialAttackTime = now; // Atualiza o relógio do último ataque especial
+                    lastSpecialAttackTime = now;
                 }
+            }
+        }
+
+        // [L] - DASH DE ESQUIVA (Gasta 20 Mana e Invulnerável)
+        if (key === 'l') {
+            const DASH_COST = 20;
+            // Só executa o dash se tiver mana e se não estiver a meio de um
+            if (player.mana >= DASH_COST && !player.isDashing) {
+                player.mana -= DASH_COST;
+                player.startDash();
+                safePlayEffect(sounds.jump); // Usa o som de pulo para o impulso
             }
         }
     }
@@ -659,7 +654,7 @@ function resetGame() {
     playerProjectiles = [];
     droppedItems.forEach(i => i.destroy(scene));
     droppedItems = [];
-    visualEffects.forEach(v => v.destroy()); // Limpa a fumaça antiga ao reiniciar
+    visualEffects.forEach(v => v.destroy()); 
     visualEffects = [];
 
     platformsData.forEach(p => scene.remove(p));
@@ -687,6 +682,7 @@ function resetGame() {
         player.knockbackX = 0;
         player.invulnerabilityTimer = 0;
         player.flashTimer = 0;
+        player.isDashing = false; // Garante que não renasce a meio do dash!
     }
 
     const levelData = buildLevel(scene, currentPhase);
@@ -741,6 +737,7 @@ function updateHUD() {
                 <div class="control-line"><span class="key-highlight">W A S D</span> : Mover / Pular</div>
                 <div class="control-line"><span class="key-highlight">J</span> : Ataque Básico</div>
                 <div class="control-line"><span class="key-highlight">K</span> : Bola de Fogo <span class="mana-cost">(40 Mana)</span></div>
+                <div class="control-line"><span class="key-highlight">L</span> : Dash Mágico <span class="mana-cost">(20 Mana)</span></div>
             </div>
 
             ${transitionOverlay}
@@ -802,7 +799,8 @@ function animate(currentTime) {
             let e = enemies[i];
             e.update(player.sprite.position, activeColliders, GRAVITY);
 
-            if (player.sprite.position.distanceTo(e.sprite.position) < 30) {
+            // AQUI: Proteção de I-Frames! O Slime só te magoa se tu NÃO estiveres a dar Dash.
+            if (!player.isDashing && player.sprite.position.distanceTo(e.sprite.position) < 30) {
                 const hpBefore = player.health;
                 player.takeDamage(1, sounds, e.sprite.position.x);
                 if (player.health < hpBefore) totalDamageTaken += (hpBefore - player.health);
@@ -833,7 +831,6 @@ function animate(currentTime) {
                     }
 
                     if (!portal.active) {
-                        // O portal também explode em fumaça!
                         visualEffects.push(new SmokeEffect(scene, portal.mesh.position.x, portal.mesh.position.y));
                         portals.splice(k, 1);
                     }
@@ -861,10 +858,7 @@ function animate(currentTime) {
 
                         if (e.health <= 0) {
                             handleEnemyDefeatDrop(e.sprite.position.x, e.sprite.position.y);
-                            
-                            // AQUI: ADICIONAMOS A ANIMAÇÃO DE FUMO NO LUGAR ONDE O INIMIGO MORREU!
                             visualEffects.push(new SmokeEffect(scene, e.sprite.position.x, e.sprite.position.y));
-                            
                             e.destroy();
                             enemies.splice(j, 1);
                         }
@@ -879,7 +873,6 @@ function animate(currentTime) {
             }
         }
 
-        // --- ATUALIZAÇÃO DOS EFEITOS DE FUMO ---
         for (let i = visualEffects.length - 1; i >= 0; i--) {
             let effect = visualEffects[i];
             effect.update();
@@ -888,7 +881,6 @@ function animate(currentTime) {
                 visualEffects.splice(i, 1);
             }
         }
-        // ---------------------------------------
 
         for (let i = droppedItems.length - 1; i >= 0; i--) {
             let item = droppedItems[i];
@@ -925,5 +917,4 @@ function animate(currentTime) {
     renderer.render(scene, camera);
 }
 
-// Inicia o Loop
 requestAnimationFrame(animate);
