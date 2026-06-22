@@ -28,6 +28,7 @@ O desafio consiste em controlar um Mago que deve derrotar hordas de *Slimes* com
 - 🧠 **IA Adaptativa**: Inimigos com comportamentos distintos e sistema de loot inteligente.
 - 🏆 **Sistema de Ranking**: Avaliação de desempenho baseada em tempo e dano sofrido.
 - 🌳 **Ambiente Imersivo**: Cenário detalhado com efeitos visuais e sonoros.
+- ⚡ **Dash Mágico**: Executar a habilidade de esquiva.
 
 ---
 
@@ -115,6 +116,19 @@ Sobrevive a **3 ondas** de dificuldade incremental. O jogo culmina com o apareci
  |
 | **Pausa** | `ESC` | Pausa a ação e a música. |
 
+
+## ⚡Funcionalidade do Botão Dash
+
+O botão Dash permite executar a habilidade de esquiva com um clique:
+
+    Custo: 20 pontos de Mana
+
+    Efeito: Movimento rápido na direção do jogador com invulnerabilidade temporária
+
+    Integração: Funciona com a tecla L 
+
+    Indicador: Desabilitado automaticamente quando o jogador não tem mana suficiente
+    
 ---
 
 ## 🛠️ Arquitetura e Level Design
