@@ -11,6 +11,16 @@ O desafio consiste em controlar um Mago que deve derrotar hordas de *Slimes* com
 
 ---
 
+### 🧠 Equipe:
+
+- Fernando Anderson Borges - 511344
+- Francisco Felipe Rodrigues de Sousa - 499193
+- Ianque Pereira da Silva - 471014
+- Ismael Johnny Marques Ferreira - 398901
+- William do Vale Mesquita - 390185
+
+---
+
 ### ✨ Características Principais
 
 - ⚔️ **Combate Dinâmico**: Sistema de combate com ataques básicos e magias especiais.
